@@ -1773,8 +1773,27 @@
             }
           }
         }
-        // Sort cloud layers by height
-        obs.skyCondition.sort((a, b) => (a.cloudBase || 0) - (b.cloudBase || 0));
+        // Deduplicate and distill: max 3 layers, merge bases within 500 ft
+        const _CR = { SKC:0, FEW:1, SCT:2, BKN:3, OVC:4 };
+        const _valid = obs.skyCondition.filter(l => l.cloudBase !== null);
+        _valid.sort((a, b) => a.cloudBase - b.cloudBase);
+        const _deduped = [];
+        for (const l of _valid) {
+          const ni = _deduped.findIndex(d => Math.abs(d.cloudBase - l.cloudBase) < 500);
+          if (ni < 0) _deduped.push({ ...l });
+          else if ((_CR[l.skyCover] || 0) > (_CR[_deduped[ni].skyCover] || 0))
+            _deduped[ni] = { ...l };
+        }
+        // Keep: lowest ceiling + 1 layer below it + 2nd ceiling (if room)
+        const _ceils  = _deduped.filter(l => l.skyCover === 'BKN' || l.skyCover === 'OVC');
+        const _others = _deduped.filter(l => l.skyCover !== 'BKN' && l.skyCover !== 'OVC');
+        if (_ceils.length) {
+          const _below = _others.filter(l => l.cloudBase < _ceils[0].cloudBase).slice(-1);
+          obs.skyCondition = [..._below, _ceils[0], ..._ceils.slice(1, 2)];
+        } else {
+          obs.skyCondition = _others.slice(0, 3);
+        }
+        obs.skyCondition.sort((a, b) => a.cloudBase - b.cloudBase);
       }
       // Apply 910ff fallback if no true gust (911ff) was found
       if (!obs.wgst && obs._wspd10 && obs.wspd && obs._wspd10 > obs.wspd) {
