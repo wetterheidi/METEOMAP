@@ -3561,18 +3561,31 @@
         const now = new Date();
         const from = new Date(now - 3 * 3600000);
         const fmt = d => d.toISOString().replace(/[-T:]/g, '').slice(0, 12);
-        const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2,'0')}&begin=${fmt(from)}&end=${fmt(now)}`;
-        const r = await corsGet(url);
-        const text = await r.text();
-        // Scan for the matching station line (newest = last match wins)
-        let obs = null;
-        for (const line of text.split('\n')) {
-          const l = line.trim().replace(/=+$/, '');
-          if (!l || l.startsWith('#')) continue;
-          if (parseInt(l.split(',')[0]) !== wmoId) continue;
-          try { const o = parseSynopLine(l, stations); if (o) obs = o; } catch {}
-        }
-        return obs;
+
+        // 1) Try Ogimet FM-12
+        try {
+          const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2,'0')}&begin=${fmt(from)}&end=${fmt(now)}`;
+          const r = await corsGet(url);
+          const text = await r.text();
+          let obs = null;
+          for (const line of text.split('\n')) {
+            const l = line.trim().replace(/=+$/, '');
+            if (!l || l.startsWith('#')) continue;
+            if (parseInt(l.split(',')[0]) !== wmoId) continue;
+            try { const o = parseSynopLine(l, stations); if (o) obs = o; } catch {}
+          }
+          if (obs) return obs;
+        } catch {}
+
+        // 2) Fallback: DWD BUFR (stations that don't report via FM-12)
+        const st = stationById(wmoId);
+        if (!st) return null;
+        const pad = 0.5;
+        const bbox = `${(st.lat - pad).toFixed(2)},${(st.lon - pad).toFixed(2)},${(st.lat + pad).toFixed(2)},${(st.lon + pad).toFixed(2)}`;
+        const bufrObs = await fetch(`/dwd-synop?hours=3&bbox=${bbox}`)
+          .then(r => r.ok ? r.json() : [])
+          .catch(() => []);
+        return bufrObs.find(o => o.wmoId === wmoId) || null;
       }
 
       async function renderWx(id, idx) {
