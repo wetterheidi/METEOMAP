@@ -1,0 +1,3055 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeteoMap — Wettermeldungsviewer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080c14;
+      --panel: #0d1420;
+      --panel2: #121b2c;
+      --panel3: #182234;
+      --border: #1d2d42;
+      --border2: #253a54;
+      --text: #bdd4e8;
+      --text-dim: #4d6e8a;
+      --text-mid: #7a9ab8;
+      --cyan: #00d4ff;
+      --amber: #ffb000;
+      --green: #00e090;
+      --red: #ff4444;
+      --mono: 'JetBrains Mono', monospace;
+      --head: 'Chakra Petch', sans-serif;
+      --body: 'Inter', sans-serif;
+      --sb-w: 272px;
+      --cs-blue: #2196F3;
+      --cs-white: #e8e8e8;
+      --cs-green: #43A047;
+      --cs-yellow: #FDD835;
+      --cs-amber: #FB8C00;
+      --cs-red: #E53935;
+    }
+
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+      font-size: 13px;
+    }
+
+    /* ── MAP ── */
+    #map {
+      position: absolute;
+      inset: 0;
+      left: var(--sb-w);
+      z-index: 0;
+    }
+
+    /* ── SIDEBAR ── */
+    #sidebar {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--sb-w);
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    #sb-head {
+      padding: 14px 16px 12px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    /* ── SOURCE TOGGLE ── */
+    #source-row {
+      display: flex;
+      gap: 4px;
+      padding: 6px 10px;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .src-btn {
+      flex: 1;
+      padding: 5px 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-family: var(--head);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all .15s;
+      text-transform: uppercase;
+    }
+
+    .src-btn:hover:not(.active) {
+      border-color: var(--text-dim);
+      color: var(--text-mid);
+    }
+
+    .src-btn.active {
+      background: rgba(0, 212, 255, .08);
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    .src-btn#src-synop.active {
+      background: rgba(255, 176, 0, .08);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+
+    #sb-head h1 {
+      font-family: var(--head);
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: var(--cyan);
+    }
+
+    #sb-head .sub {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 2px;
+      letter-spacing: .05em;
+    }
+
+    /* Status */
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: var(--panel2);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+
+    #status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #333;
+      transition: background .3s;
+      flex-shrink: 0;
+    }
+
+    #status-dot.loading {
+      background: var(--amber);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    #status-dot.ok {
+      background: var(--green);
+    }
+
+    #status-dot.error {
+      background: var(--red);
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .3
+      }
+    }
+
+    #status-text {
+      color: var(--text-mid);
+      flex: 1;
+    }
+
+    #station-count {
+      color: var(--text-dim);
+      white-space: nowrap;
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    /* Tile switcher */
+    #tile-row {
+      display: flex;
+      gap: 4px;
+      padding: 8px 12px;
+      background: var(--panel2);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .tile-btn {
+      flex: 1;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-family: var(--head);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .05em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all .15s;
+      text-transform: uppercase;
+    }
+
+    .tile-btn.active {
+      background: var(--border2);
+      color: var(--text);
+      border-color: var(--border2);
+    }
+
+    .tile-btn:hover:not(.active) {
+      border-color: var(--text-dim);
+      color: var(--text-mid);
+    }
+
+    /* Param selection */
+    /* ── OVERLAYS ── */
+    #overlay-section {
+      flex-shrink: 0;
+      padding: 8px 12px 10px;
+      background: var(--panel2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    #overlay-title {
+      font-family: var(--head);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+
+    #overlay-btns {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+
+    .ov-btn {
+      flex: 1;
+      padding: 5px 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-family: var(--head);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .05em;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all .15s;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+
+    .ov-btn:hover:not(.active) {
+      border-color: var(--text-dim);
+      color: var(--text-mid);
+    }
+
+    .ov-btn.active {
+      border-color: var(--cyan);
+      color: var(--cyan);
+      background: rgba(0, 212, 255, .08);
+    }
+
+    .ov-btn[data-ov="sat"].active {
+      border-color: var(--amber);
+      color: var(--amber);
+      background: rgba(255, 176, 0, .08);
+    }
+
+    .ov-icon {
+      font-size: 13px;
+    }
+
+    #overlay-controls {
+      padding-top: 4px;
+    }
+
+    #ov-time-info {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--green);
+      margin-bottom: 5px;
+      text-align: center;
+      letter-spacing: .04em;
+    }
+
+    #ov-opacity-row,
+    #ov-satproduct-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .ov-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      min-width: 52px;
+    }
+
+    #ov-opacity {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 3px;
+      background: var(--border2);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    #ov-opacity::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--cyan);
+      cursor: pointer;
+      border: 2px solid var(--bg);
+    }
+
+    #ov-opacity-val {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      min-width: 28px;
+    }
+
+    #ov-colorscheme,
+    #ov-satproduct {
+      flex: 1;
+      background: var(--panel3);
+      border: 1px solid var(--border);
+      color: var(--text-mid);
+      font-size: 10px;
+      padding: 2px 4px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    #ov-colorscheme:hover,
+    #ov-satproduct:hover {
+      border-color: var(--border2);
+    }
+
+    #param-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+    }
+
+    #param-scroll::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #param-scroll::-webkit-scrollbar-thumb {
+      background: var(--border2);
+      border-radius: 2px;
+    }
+
+    .param-group {
+      margin-bottom: 14px;
+    }
+
+    .param-group-title {
+      font-family: var(--head);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 0 4px 5px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 6px;
+    }
+
+    .param-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background .12s;
+      user-select: none;
+      border: 1px solid transparent;
+    }
+
+    .param-item:hover {
+      background: var(--panel3);
+    }
+
+    .param-item.sel-1 {
+      background: rgba(0, 212, 255, .08);
+      border-color: rgba(0, 212, 255, .2);
+    }
+
+    .param-item.sel-2 {
+      background: rgba(255, 176, 0, .08);
+      border-color: rgba(255, 176, 0, .2);
+    }
+
+    .sel-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      border: 1.5px solid var(--border2);
+      flex-shrink: 0;
+      transition: all .15s;
+    }
+
+    .param-item.sel-1 .sel-dot {
+      background: var(--cyan);
+      border-color: var(--cyan);
+    }
+
+    .param-item.sel-2 .sel-dot {
+      background: var(--amber);
+      border-color: var(--amber);
+    }
+
+    .param-name {
+      font-size: 12px;
+      flex: 1;
+    }
+
+    .param-slot {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      display: none;
+      letter-spacing: .05em;
+    }
+
+    .param-item.sel-1 .param-slot {
+      display: block;
+      background: rgba(0, 212, 255, .15);
+      color: var(--cyan);
+    }
+
+    .param-item.sel-2 .param-slot {
+      display: block;
+      background: rgba(255, 176, 0, .15);
+      color: var(--amber);
+    }
+
+    /* Legend */
+    #legend-section {
+      flex-shrink: 0;
+      padding: 10px 12px;
+      border-top: 1px solid var(--border);
+      background: var(--panel2);
+    }
+
+    #legend-title {
+      font-family: var(--head);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+
+    .legend-block {
+      margin-bottom: 8px;
+    }
+
+    .legend-label {
+      font-family: var(--head);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .legend-gradient {
+      height: 12px;
+      border-radius: 3px;
+      margin-bottom: 3px;
+    }
+
+    .legend-range {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+
+    .legend-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+    }
+
+    .cs-badge {
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    /* ── TIME CONTROL ── */
+    #time-wrap {
+      position: absolute;
+      left: var(--sb-w);
+      right: 0;
+      bottom: 24px;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    #time-ctrl {
+      pointer-events: all;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--panel);
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      padding: 10px 18px;
+      min-width: 440px;
+      box-shadow: 0 6px 28px rgba(0, 0, 0, .65);
+      backdrop-filter: blur(4px);
+    }
+
+    #time-display {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--green);
+      white-space: nowrap;
+      min-width: 160px;
+      text-align: center;
+      letter-spacing: .03em;
+    }
+
+    #time-slider {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 3px;
+      background: var(--border2);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    #time-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--cyan);
+      cursor: pointer;
+      border: 2px solid var(--bg);
+    }
+
+    .t-btn {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      color: var(--text-mid);
+      padding: 5px 9px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+
+    .t-btn:hover {
+      background: var(--cyan);
+      color: var(--bg);
+      border-color: var(--cyan);
+    }
+
+    /* ── LEAFLET OVERRIDES ── */
+    .leaflet-popup-content-wrapper {
+      background: var(--panel) !important;
+      border: 1px solid var(--border2) !important;
+      border-radius: 8px !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, .7) !important;
+      color: var(--text) !important;
+    }
+
+    .leaflet-popup-content {
+      margin: 14px 16px !important;
+    }
+
+    .leaflet-popup-tip-container .leaflet-popup-tip {
+      background: var(--panel) !important;
+    }
+
+    .leaflet-popup-close-button {
+      color: var(--text-dim) !important;
+      font-size: 16px !important;
+      right: 10px !important;
+      top: 10px !important;
+    }
+
+    .leaflet-control-zoom a {
+      background: var(--panel) !important;
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: var(--panel3) !important;
+    }
+
+    .leaflet-control-attribution {
+      background: rgba(8, 12, 20, .75) !important;
+      color: var(--text-dim) !important;
+      font-size: 9px !important;
+    }
+
+    .leaflet-control-attribution a {
+      color: var(--text-dim) !important;
+    }
+
+    /* ── LOADING OVERLAY ── */
+    #loading-overlay {
+      position: absolute;
+      left: var(--sb-w);
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 900;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity .25s;
+    }
+
+    #loading-overlay.visible {
+      opacity: 1;
+    }
+
+    #loading-box {
+      background: rgba(8, 12, 20, .88);
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, .7);
+      backdrop-filter: blur(6px);
+    }
+
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2.5px solid var(--border2);
+      border-top-color: var(--cyan);
+      animation: spin .8s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    #loading-msg {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-mid);
+      letter-spacing: .04em;
+    }
+
+    #loading-sub {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 3px;
+      font-family: var(--body);
+    }
+
+    .leaflet-bottom.leaflet-right {
+      bottom: 80px !important;
+    }
+
+    /* Allow translated markers to overflow their 1x1 anchor point */
+    .leaflet-marker-pane .leaflet-mm-marker {
+      overflow: visible !important;
+    }
+
+    /* Custom tooltip override */
+    .leaflet-tooltip.metar-tt {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+
+    .leaflet-tooltip.metar-tt::before {
+      display: none !important;
+    }
+
+    /* ── POPUP CONTENT ── */
+    .pop-head {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+
+    .pop-icao {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--cyan);
+    }
+
+    .pop-name {
+      font-size: 12px;
+      color: var(--text-mid);
+      margin-top: 2px;
+    }
+
+    .pop-meta {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    .pop-badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+
+    .pop-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      margin-bottom: 10px;
+    }
+
+    .pop-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 3px 7px;
+      background: var(--panel2);
+      border-radius: 3px;
+    }
+
+    .pop-key {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    .pop-val {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    .pop-raw {
+      font-family: var(--mono);
+      font-size: 10px;
+      background: var(--bg);
+      padding: 8px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      word-break: break-all;
+      line-height: 1.7;
+      color: var(--text-mid);
+      white-space: pre-wrap;
+      margin-top: 8px;
+    }
+
+    .pop-sky {
+      margin-bottom: 8px;
+    }
+
+    .pop-sky-title {
+      font-size: 10px;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+      letter-spacing: .08em;
+    }
+
+    .sky-chip {
+      display: inline-block;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-family: var(--mono);
+      font-size: 11px;
+      margin: 2px 2px 2px 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- MAP -->
+  <div id="map"></div>
+  <div id="loading-overlay">
+    <div id="loading-box">
+      <div class="spinner"></div>
+      <div>
+        <div id="loading-msg">Lade Wetterdaten …</div>
+        <div id="loading-sub"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sb-head">
+      <h1>▶ METEOMAP</h1>
+      <div class="sub">METAR · SPECI · SYNOP-BUFR &nbsp;|&nbsp; AWC · DWD OpenData</div>
+    </div>
+
+    <div id="status-bar">
+      <div id="status-dot"></div>
+      <span id="status-text">Bereit</span>
+      <span id="station-count">— Stationen</span>
+    </div>
+
+    <div id="source-row">
+      <button class="src-btn active" id="src-metar" title="METAR/SPECI von aviationweather.gov">
+        ✈ METAR
+      </button>
+      <button class="src-btn" id="src-synop" title="SYNOP von OGIMET (benötigt wmo_stations.json)">
+        ⊕ SYNOP
+      </button>
+    </div>
+
+    <div id="tile-row">
+      <button class="tile-btn active" data-tile="dark">Dunkel</button>
+      <button class="tile-btn" data-tile="light">Hell</button>
+      <button class="tile-btn" data-tile="topo">Topo</button>
+      <button class="tile-btn" data-tile="sat">SAT</button>
+    </div>
+
+    <div id="overlay-section">
+      <div id="overlay-title">Overlays</div>
+      <div id="overlay-btns">
+        <button class="ov-btn" id="ov-radar" data-ov="radar">
+          <span class="ov-icon">◉</span> Radar
+        </button>
+        <button class="ov-btn" id="ov-sat" data-ov="sat">
+          <span class="ov-icon">◎</span> Satellit IR
+        </button>
+      </div>
+      <div id="overlay-controls" style="display:none;">
+        <div id="ov-time-info"></div>
+        <div id="ov-opacity-row">
+          <span class="ov-label">Deckkraft</span>
+          <input type="range" id="ov-opacity" min="10" max="100" value="70" step="5">
+          <span id="ov-opacity-val">70%</span>
+        </div>
+        <!-- Farbschema: nur mit RainViewer API-Key verfügbar -->
+        <div id="ov-satproduct-row" style="display:none;">
+          <span class="ov-label">Kanal</span>
+          <select id="ov-satproduct">
+            <option value="Satellite_meteosat_1km_euat_rgb_day_hrv_and_night_ir108_3h">HRV/IR (Tag+Nacht)</option>
+            <option value="Satellite_worldmosaic_3km_world_ir108_3h">IR 10.8 µm (Global)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="param-scroll">
+      <!-- filled by JS -->
+    </div>
+
+    <div id="legend-section">
+      <div id="legend-title">Legende</div>
+      <div id="legend-container"></div>
+    </div>
+  </div>
+
+  <!-- TIME CONTROL -->
+  <div id="time-wrap">
+    <div id="time-ctrl">
+      <button class="t-btn" id="btn-now" title="Aktuelle Daten">▶ Jetzt</button>
+      <input type="range" id="time-slider" min="-96" max="0" value="0" step="1">
+      <div id="time-display">▶ AKTUELL</div>
+      <button class="t-btn" id="refresh-btn" title="Daten neu laden">↺ Laden</button>
+    </div>
+  </div>
+
+  <script>
+    // ═══════════════════════════════════════════════════════════════
+    // CONSTANTS & PARAMETER DEFINITIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    const PARAMS = [
+      { id: 'colorstate', label: 'Color State', unit: '', group: 'Sicht & Ceiling' },
+      { id: 'visibility', label: 'Sicht', unit: 'm', group: 'Sicht & Ceiling' },
+      { id: 'ceiling', label: 'Ceiling', unit: 'hft', group: 'Sicht & Ceiling' },
+      { id: 'clouds_lo', label: 'Tiefe Wolken', unit: 'hft', group: 'Wolken' },
+      { id: 'clouds_mi', label: 'Mittelhohe Wolken', unit: 'hft', group: 'Wolken' },
+      { id: 'clouds_hi', label: 'Hohe Wolken', unit: 'hft', group: 'Wolken' },
+      { id: 'wind_barb', label: 'Windfeder', unit: 'kt', group: 'Wind' },
+      { id: 'wind_dir', label: 'Windrichtung', unit: '°', group: 'Wind' },
+      { id: 'wind_speed', label: 'Windgeschwindigkeit', unit: 'kt', group: 'Wind' },
+      { id: 'wind_gust', label: 'Böen', unit: 'kt', group: 'Wind' },
+      { id: 'pressure', label: 'Druck (QNH)', unit: 'hPa', group: 'Atmosphäre' },
+      { id: 'pres_tend', label: 'Druckänderung*', unit: 'hPa', group: 'Atmosphäre' },
+      { id: 'ww', label: 'WW (Wetter)', unit: '', group: 'Atmosphäre' },
+      { id: 'temperature', label: 'Temperatur', unit: '°C', group: 'Temp / Feuchte' },
+      { id: 'dewpoint', label: 'Taupunkt', unit: '°C', group: 'Temp / Feuchte' },
+    ];
+    const PARAM_GROUPS = ['Sicht & Ceiling', 'Wolken', 'Wind', 'Atmosphäre', 'Temp / Feuchte'];
+
+    // NATO Color State thresholds (worst of visibility OR ceiling applies)
+    const CS = [
+      { name: 'BLUE', abbr: 'BLU', bg: '#1565C0', fg: '#ffffff', cFt: 2500, vMtr: 8000 },
+      { name: 'WHITE', abbr: 'WHT', bg: '#e0e0e0', fg: '#111111', cFt: 1500, vMtr: 5000 },
+      { name: 'GREEN', abbr: 'GRN', bg: '#2E7D32', fg: '#ffffff', cFt: 700, vMtr: 3700 },
+      { name: 'YELLOW', abbr: 'YLO', bg: '#F9A825', fg: '#111111', cFt: 500, vMtr: 2400 },
+      { name: 'AMBER', abbr: 'AMB', bg: '#E65100', fg: '#ffffff', cFt: 200, vMtr: 800 },
+      { name: 'RED', abbr: 'RED', bg: '#B71C1C', fg: '#ffffff', cFt: 0, vMtr: 0 },
+    ];
+
+    const MAX_MARKERS = 700;
+    const CACHE_TTL = 4.5 * 60 * 1000;
+    const AUTO_REFRESH = 5 * 60 * 1000;
+
+    // ── Origin-aware request routing ──────────────────────────────
+    //  file://   → CORS blocked everywhere; show setup hint
+    //  localhost → use local proxy (/proxy?url=...)
+    //  real host → direct fetch (server sets CORS headers)
+    function resolveUrl(rawUrl) {
+      const h = location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1') {
+        // Route OGIMET requests through dedicated proxy endpoint
+        if (rawUrl.includes('ogimet.com')) {
+          return `/ogimet?url=${encodeURIComponent(rawUrl)}`;
+        }
+        return `/proxy?url=${encodeURIComponent(rawUrl)}`;
+      }
+      return rawUrl;
+    }
+
+    function isFileProtocol() { return location.protocol === 'file:'; }
+
+    async function corsGet(rawUrl) {
+      if (isFileProtocol()) {
+        // Show one-time setup banner
+        if (!window._fileWarnShown) {
+          window._fileWarnShown = true;
+          showFileProtocolBanner();
+        }
+        throw new Error('file://-Origin blockiert – bitte server.py starten');
+      }
+      const url = resolveUrl(rawUrl);
+      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r;
+    }
+
+    function showFileProtocolBanner() {
+      const b = document.createElement('div');
+      b.style.cssText = `
+    position:fixed;top:0;left:0;right:0;z-index:9999;
+    background:#7c2600;color:#ffd0b0;
+    font-family:'JetBrains Mono',monospace;font-size:12px;
+    padding:14px 20px;line-height:1.7;border-bottom:2px solid #ff6030;`;
+      b.innerHTML = `
+    <strong style="font-size:14px;color:#ffcc80;">⚠ Datei direkt geöffnet – CORS blockiert alle Netzwerkzugriffe</strong><br>
+    Lösung: <code style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:3px;">python server.py</code>
+    im selben Ordner starten, dann
+    <a href="http://localhost:8765/meteomap.html" target="_blank"
+       style="color:#80d8ff;text-decoration:underline;">http://localhost:8765/meteomap.html</a> öffnen.
+    <button onclick="this.parentElement.remove()" style="float:right;background:none;border:1px solid #ff8060;
+      color:#ffcc80;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px;">✕</button>`;
+      document.body.prepend(b);
+    }
+
+    // App state
+    let selectedParams = ['colorstate'];
+    let timeOffset = 0;          // hours from now (0 = current)
+    let allObs = [];         // all fetched observations for current window
+    let markerLayer = null;
+    let autoTimer = null;
+    let isLoading = false;
+    const dataCache = new Map();
+
+    // ═══════════════════════════════════════════════════════════════
+    // DATA SOURCE MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════
+
+    let activeSources = new Set(['metar']); // 'metar' | 'synop'
+    let wmoStations = null;               // loaded from wmo_stations.json
+    const missingStationCache = new Map();  // wmoId → station obj (fetched on demand)
+    let synopObs = [];                 // parsed SYNOP observations
+
+    // ── Source toggle setup ───────────────────────────────────────
+    function setupSourceToggles() {
+      document.getElementById('src-metar').addEventListener('click', () => toggleSource('metar'));
+      document.getElementById('src-synop').addEventListener('click', () => toggleSource('synop'));
+    }
+
+    function toggleSource(src) {
+      if (activeSources.has(src) && activeSources.size === 1) return; // keep at least one
+      if (activeSources.has(src)) {
+        activeSources.delete(src);
+        if (src === 'synop') synopObs = [];
+      } else {
+        activeSources.add(src);
+      }
+      document.getElementById('src-metar').classList.toggle('active', activeSources.has('metar'));
+      document.getElementById('src-synop').classList.toggle('active', activeSources.has('synop'));
+      // Clear everything and force a clean redraw
+      allObs = [];
+      synopObs = [];
+      dataCache.clear();
+      if (markerLayer) { map.removeLayer(markerLayer); markerLayer = null; }
+      updateDisplay();
+    }
+
+    // ── WMO Station DB ────────────────────────────────────────────
+    async function loadWmoStations() {
+      if (wmoStations) return wmoStations;
+      try {
+        const r = await fetch('/wmo_stations.json');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        wmoStations = await r.json();
+        console.log(`WMO-Stationsliste geladen: ${wmoStations.length} Stationen`);
+        return wmoStations;
+      } catch (e) {
+        console.warn('wmo_stations.json nicht gefunden:', e.message);
+        showSynopHint();
+        return null;
+      }
+    }
+
+    function showSynopHint() {
+      if (document.getElementById('synop-hint')) return;
+      const el = document.createElement('div');
+      el.id = 'synop-hint';
+      el.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:9999;
+    background:#4a3000;color:#ffd080;font-family:'JetBrains Mono',monospace;font-size:11px;
+    padding:12px 18px;line-height:1.7;border-bottom:2px solid #ffaa00;`;
+      el.innerHTML = `<strong>⚠ SYNOP: wmo_stations.json fehlt</strong><br>
+    Bitte einmalig <code>python fetch_wmo_stations.py</code> ausführen und die Datei
+    in den MeteoMap-Ordner legen.
+    <button onclick="this.parentElement.remove()" style="float:right;background:none;
+      border:1px solid #ffaa00;color:#ffd080;padding:2px 10px;border-radius:4px;cursor:pointer;">✕</button>`;
+      document.body.prepend(el);
+    }
+
+    function stationById(wmoId) {
+      if (!wmoId) return null;
+      const id = parseInt(wmoId);
+      // Check main DB
+      if (wmoStations) {
+        const found = wmoStations.find(s => s.wmo === id);
+        if (found) return found;
+      }
+      // Check on-demand cache
+      return missingStationCache.get(id) || null;
+    }
+
+    // Batch-fetch station coords for WMO IDs not in our DB
+    // AWC stationinfo only accepts ICAO codes, not WMO IDs → use chunked requests
+    // with ICAO lookup as best-effort. Primary fix is running fetch_wmo_stations.py v2.
+    async function fetchMissingStations(wmoIds) {
+      const missing = wmoIds.filter(id => !stationById(id));
+      if (!missing.length) return;
+      console.log(`${missing.length} Stationen nicht in DB (wmo_stations.json neu erstellen empfohlen)`);
+      // No reliable batch API for WMO→coords without ICAO.
+      // Stations will be missing until wmo_stations.json is rebuilt with fetch_wmo_stations.py v2.
+    }
+
+    // ── OGIMET SYNOP Fetch ────────────────────────────────────────
+    // Determines which WMO blocks overlap the current map bbox,
+    // fetches SYNOP strings from OGIMET via server.py proxy, parses them.
+
+    // Static WMO block → approximate geographic coverage
+    // Overlap check: does block region intersect the map bbox?
+    const WMO_BLOCKS = [
+      { b: 1, s: 55, n: 90, w: -90, e: 20 },  // Iceland, Greenland
+      { b: 2, s: 49, n: 72, w: -12, e: 5 },  // UK, Ireland, Norway coast
+      { b: 3, s: 41, n: 55, w: -10, e: 10 },  // France (incl. Corsica ~9°E)
+      { b: 4, s: 25, n: 50, w: -20, e: 10 },  // Azores, NW Africa
+      { b: 5, s: 10, n: 40, w: -20, e: 25 },  // N Africa W
+      { b: 6, s: 44, n: 75, w: 3, e: 35 },  // Scandinavia + Netherlands/Belgium/Switzerland
+      { b: 7, s: 35, n: 65, w: 0, e: 22 },  // Benelux, Denmark, N/C Europe
+      { b: 8, s: 10, n: 40, w: 5, e: 35 },  // N Africa C
+      { b: 9, s: 10, n: 40, w: 25, e: 55 },  // N Africa E
+      { b: 10, s: 46, n: 56, w: 5, e: 16 },  // Germany, Austria-W, Switzerland-E
+      { b: 11, s: 43, n: 56, w: 12, e: 27 },  // Austria-E, Czech, Slovakia, Hungary, Croatia-N
+      { b: 12, s: 48, n: 56, w: 14, e: 25 },  // Poland
+      { b: 13, s: 43, n: 58, w: 22, e: 38 },  // Romania, Ukraine W
+      { b: 14, s: 40, n: 56, w: 14, e: 35 },  // Balkans, Croatia, Serbia, Bosnia
+      { b: 15, s: 35, n: 45, w: -10, e: 5 },  // Iberia
+      { b: 16, s: 35, n: 48, w: 5, e: 20 },  // Italy, Adriatic coast
+      { b: 17, s: 30, n: 45, w: 25, e: 45 },  // Turkey, Middle East
+      { b: 20, s: 55, n: 75, w: 25, e: 65 },  // Russia W
+      { b: 21, s: 55, n: 75, w: 55, e: 95 },  // Russia C
+      { b: 23, s: 50, n: 70, w: 55, e: 100 },  // Russia
+      { b: 24, s: 45, n: 65, w: 85, e: 135 },  // Russia E
+      { b: 25, s: 55, n: 80, w: 95, e: 150 },  // Russia far E
+      { b: 26, s: 44, n: 60, w: 23, e: 42 },  // Ukraine, Belarus
+      { b: 27, s: 50, n: 68, w: 35, e: 65 },  // Russia Urals
+      { b: 28, s: 35, n: 55, w: 50, e: 80 },  // Central Asia
+      { b: 30, s: 25, n: 45, w: 45, e: 75 },  // Iran, Afghanistan
+      { b: 31, s: 15, n: 40, w: 0, e: 25 },  // N Africa / Sahara
+      { b: 32, s: 0, n: 25, w: 0, e: 25 },  // W Africa
+      { b: 33, s: -20, n: 10, w: 0, e: 30 },  // C Africa
+      { b: 34, s: -40, n: 5, w: 10, e: 45 },  // S Africa W
+      { b: 35, s: -40, n: 5, w: 30, e: 55 },  // S Africa E
+      { b: 40, s: 15, n: 40, w: 35, e: 75 },  // Arabian Peninsula
+      { b: 41, s: 5, n: 30, w: 60, e: 80 },  // Pakistan, NW India
+      { b: 42, s: 10, n: 35, w: 65, e: 90 },  // India
+      { b: 43, s: 10, n: 30, w: 85, e: 110 },  // SE Asia N
+      { b: 44, s: -10, n: 20, w: 90, e: 125 },  // SE Asia S
+      { b: 45, s: 20, n: 45, w: 95, e: 135 },  // China
+      { b: 46, s: 30, n: 55, w: 100, e: 145 },  // China N, Korea
+      { b: 47, s: 25, n: 50, w: 125, e: 150 },  // Japan
+      { b: 48, s: -10, n: 30, w: 100, e: 135 },  // SE Asia
+      { b: 60, s: -30, n: 35, w: -20, e: 20 },  // W Africa
+      { b: 61, s: -20, n: 20, w: 20, e: 55 },  // E Africa
+      { b: 71, s: 45, n: 80, w: -145, e: -55 },  // Canada
+      { b: 72, s: 25, n: 50, w: -130, e: -65 },  // USA E
+      { b: 74, s: 15, n: 30, w: -100, e: -65 },  // Mexico, Caribbean
+      { b: 76, s: -10, n: 25, w: -95, e: -55 },  // C America
+      { b: 80, s: -60, n: 15, w: -85, e: -30 },  // S America
+      { b: 89, s: -90, n: -60, w: -180, e: 180 },  // Antarctica
+      { b: 94, s: -45, n: -10, w: 110, e: 160 },  // Australia
+      { b: 96, s: -30, n: 10, w: 130, e: 180 },  // Pacific W
+    ];
+
+    function blocksForBbox(west, south, east, north) {
+      return WMO_BLOCKS
+        .filter(r => r.s < north && r.n > south && r.w < east && r.e > west)
+        .map(r => r.b)
+        .sort((a, b) => a - b);
+    }
+
+    async function fetchOgimetSynop(block, hours) {
+      const now = new Date();
+      const from = new Date(now - hours * 3600000);
+      const fmt = d => d.toISOString().replace(/[-T:]/g, '').slice(0, 12);
+      const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2, '0')}&begin=${fmt(from)}&end=${fmt(now)}`;
+      const r = await corsGet(url);
+      return r.text();
+    }
+
+    async function loadSynopObs(bounds, hours) {
+      const stations = await loadWmoStations();
+      console.log('loadSynopObs: stations=', stations ? stations.length : 'NULL');
+      if (!stations) return [];
+
+      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
+      console.log('loadSynopObs: bbox=', { w, s, e, n });
+      const blocks = blocksForBbox(w, s, e, n);
+      console.log('loadSynopObs: blocks=', blocks);
+      if (!blocks.length) {
+        // Sample first 3 stations to debug
+        const sample = stations.filter(st => st.wmo).slice(0, 3);
+        console.log('Sample stations:', sample);
+        return [];
+      }
+
+      setStatusTxt(`SYNOP: lade ${blocks.length} Blöcke …`);
+      showLoading(`SYNOP: lade ${blocks.length} Blöcke …`, 'OGIMET → Parser → Karte');
+      const obs = [];
+
+      // ── Fetch BUFR + OGIMET in parallel, merge results ──────────
+      setStatusTxt('SYNOP: lade BUFR + OGIMET …');
+      showLoading('SYNOP: lade …', 'DWD BUFR + OGIMET parallel');
+
+      const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
+
+      // Launch both fetches simultaneously
+      const bufrPromise = fetch(`/dwd-synop?hours=${hours.toFixed(1)}&bbox=${bboxStr}`,
+        { signal: AbortSignal.timeout(60000) })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []);
+
+      const ogimetPromise = (async () => {
+        const ogObs = [];
+        for (const block of blocks) {
+          try {
+            const text = await fetchOgimetSynop(block, hours);
+            ogObs.push(...parseSynopBlock(text, stations, w, s, e, n));
+          } catch (e2) { }
+        }
+        return ogObs;
+      })();
+
+      const [bufrObs, ogimetObs] = await Promise.all([bufrPromise, ogimetPromise]);
+      console.log(`DWD BUFR → ${bufrObs.length} | OGIMET → ${ogimetObs.length} Stationen`);
+
+      // Merge: BUFR preferred over OGIMET (better data quality)
+      const synopSeen = new Map();
+      for (const o of ogimetObs) {
+        const k = o.wmoId || o.icaoId;
+        if (k) synopSeen.set(k, o);
+      }
+      for (const o of bufrObs) {
+        const k = o.wmoId || o.icaoId;
+        if (k) synopSeen.set(k, o); // BUFR overwrites OGIMET
+      }
+      obs.push(...synopSeen.values());
+      return obs;
+    }
+
+    // ── FM-12 SYNOP Parser ────────────────────────────────────────
+    // OGIMET format (comma-separated):
+    // "10007,2026,04,19,05,00,AAXX 19051 10007 46/60 /2803 10079 20077 ..."
+    //  [0]wmo [1]yr [2]mo [3]dy [4]hr [5]mn  [6] raw SYNOP string
+
+    function parseSynopBlock(text, stations, west, south, east, north) {
+      const result = [];
+      for (const line of text.split('\n')) {
+        const l = line.trim().replace(/=+$/, '');
+        if (!l || l.startsWith('#')) continue;
+        try {
+          const obs = parseSynopLine(l, stations);
+          if (!obs) continue;
+          if (obs.lat < south || obs.lat > north ||
+            obs.lon < west || obs.lon > east) continue;
+          result.push(obs);
+        } catch (e) { /* skip malformed */ }
+      }
+      return result;
+    }
+
+    function parseSynopLine(line, stations) {
+      // Split on comma – OGIMET always uses comma
+      const parts = line.split(',');
+      if (parts.length < 7) return null;
+
+      const wmoId = parseInt(parts[0]);
+      if (isNaN(wmoId)) return null;
+      const st = stationById(wmoId);
+      if (!st) return null;
+
+      // Date: parts[1]=year, [2]=month, [3]=day, [4]=hour, [5]=minute
+      const yr = parseInt(parts[1]), mo = parseInt(parts[2]);
+      const dy = parseInt(parts[3]), hr = parseInt(parts[4]), mn = parseInt(parts[5]);
+      if (isNaN(yr) || isNaN(hr)) return null;
+      const obsTime = Math.round(
+        new Date(Date.UTC(yr, mo - 1, dy, hr, mn || 0)).getTime() / 1000);
+
+      // Raw SYNOP is everything from parts[6] onward (rejoin in case commas inside)
+      const raw = parts.slice(6).join(',').trim();
+
+      const obs = {
+        icaoId: `WMO${String(wmoId).padStart(5, '0')}`,
+        wmoId,
+        name: st.name,
+        lat: st.lat,
+        lon: st.lon,
+        elev: st.elev,
+        country: st.country,
+        obsTime,
+        rawOb: raw,
+        metarType: 'SYNOP',
+        temp: null, dewp: null, wspd: null, wdir: null,
+        wgst: null, visib: null, altim: null, slp: null,
+        wxString: null, skyCondition: [], presTend: null,
+      };
+
+      // ── Parse FM-12 body ──────────────────────────────────────
+      // Find AAXX header and extract wind indicator
+      const aaM = raw.match(/AAXX\s+(\d{2})(\d{2})(\d{1})/);
+      const windIndicator = aaM ? parseInt(aaM[3]) : 1; // 1=m/s, 4=knots
+
+      // Tokenise the SYNOP groups (5-char groups)
+      const tokens = raw.replace(/AAXX\s+\d{5}/, '').trim().split(/\s+/);
+      // First token after header is IIiii (station number) – skip it
+      let i = 0;
+      if (tokens[i] && /^\d{5}$/.test(tokens[i])) i++;
+
+      // Group: irixhVV  (precipitation indicator, station type, h, visibility)
+      if (tokens[i] && /^[0-9\/]{5}$/.test(tokens[i])) {
+        const VVraw = tokens[i].slice(3, 5);
+        const VV = parseInt(VVraw);
+        if (!isNaN(VV)) {
+          let visMtr = null;
+          if (VV <= 50) visMtr = VV * 100;
+          else if (VV <= 80) visMtr = (VV - 50) * 1000;
+          else if (VV === 81) visMtr = 30;
+          else if (VV === 82) visMtr = 50;
+          else if (VV === 83) visMtr = 100;
+          else if (VV === 84) visMtr = 200;
+          else if (VV === 85) visMtr = 500;
+          else if (VV === 86) visMtr = 1000;
+          else if (VV === 87) visMtr = 2000;
+          else if (VV === 88) visMtr = 5000;
+          else if (VV === 89) visMtr = 9999;
+          else if (VV === 90) visMtr = 50;
+          else if (VV === 91) visMtr = 200;
+          else if (VV === 92) visMtr = 500;
+          else if (VV === 93) visMtr = 1000;
+          else if (VV === 94) visMtr = 2000;
+          else if (VV === 95) visMtr = 4000;
+          else if (VV === 96) visMtr = 10000;
+          else if (VV === 97) visMtr = 20000;
+          else if (VV === 98) visMtr = 50000;
+          else if (VV === 99) visMtr = 9999;  // ≥70 km
+          obs.visib = visMtr !== null ? String(visMtr) : null;
+        }
+        i++;
+      }
+
+      // Group: Nddff  (cloud cover, wind direction, wind speed)
+      if (tokens[i] && /^[0-9\/]{5}$/.test(tokens[i])) {
+        const N = tokens[i][0];
+        const dd = parseInt(tokens[i].slice(1, 3));
+        const ff = parseInt(tokens[i].slice(3, 5));
+        if (!isNaN(dd)) obs.wdir = dd === 99 ? 'VRB' : dd * 10;
+        if (!isNaN(ff)) {
+          // iw=0,1,2 → m/s → convert to kt; iw=3,4 → already knots
+          obs.wspd = (windIndicator <= 2) ? Math.round(ff * 1.944) : ff;
+        }
+        if (N !== '/') {
+          const nVal = parseInt(N);
+          const covers = ['SKC', 'FEW', 'FEW', 'SCT', 'SCT', 'BKN', 'BKN', 'BKN', 'OVC', 'OVC'];
+          const cover = covers[nVal];
+          if (cover && cover !== 'SKC')
+            obs.skyCondition = [{ skyCover: cover, cloudBase: null }];
+        }
+        i++;
+      }
+
+      // Remaining groups: search by prefix digit
+      for (; i < tokens.length; i++) {
+        const t = tokens[i];
+        if (!t || t === '/////') continue;
+
+        // 1SnTTT – air temperature
+        if (/^1[01]\d{3}$/.test(t)) {
+          const T = parseInt(t.slice(2)) / 10;
+          obs.temp = t[1] === '1' ? -T : T;
+        }
+        // 2SnTdTdTd – dew point
+        else if (/^2[01]\d{3}$/.test(t)) {
+          const D = parseInt(t.slice(2)) / 10;
+          obs.dewp = t[1] === '1' ? -D : D;
+        }
+        // 3PPPP – station pressure QFE → convert to QNH via ISA
+        else if (/^3\d{4}$/.test(t)) {
+          const raw3 = parseInt(t.slice(1)) / 10;
+          const qfe = raw3 < 500 ? raw3 + 1000 : raw3;
+          obs.slp = qfe;  // store QFE temporarily
+          // ISA reduction: QNH = QFE × (1 + Γh/T)^(g/ΓR)
+          // Γ=0.0065 K/m, g/ΓR=5.2561
+          const h = (obs.elev != null) ? obs.elev : 0;
+          const T = (obs.temp != null) ? obs.temp + 273.15 : 288.15; // ISA if no temp yet
+          obs.altim = Math.round(qfe * Math.pow(1 + 0.0065 * h / T, 5.2561) * 10) / 10;
+        }
+        // 4PPPP – standard-level reduced pressure; store as slp reference but
+        // do NOT use as altim — it's unreliable for elevated stations
+        else if (/^4\d{4}$/.test(t)) {
+          const raw4 = parseInt(t.slice(1)) / 10;
+          // Only use as fallback if we have no group-3 pressure at all
+          if (obs.altim === null) {
+            obs.slp = raw4 < 500 ? raw4 + 1000 : raw4;
+            obs.altim = obs.slp;  // flat terrain only, flagged as approximate
+          }
+        }
+        // 5appp – pressure tendency
+        else if (/^5[0-8]\d{3}$/.test(t)) {
+          const a = parseInt(t[1]);
+          const ppp = parseInt(t.slice(2)) / 10;
+          obs.presTend = (a >= 5) ? -ppp : ppp;
+        }
+        // 7wwW1W2 – present and past weather
+        else if (/^7\d{4}$/.test(t)) {
+          const ww = parseInt(t.slice(1, 3));
+          if (ww > 3) {
+            const mapped = synopWW(ww);
+            if (mapped && mapped.includes('TS'))
+              console.warn(`[SYNOP WW] Station ${obs.wmoId} ww=${ww} Gruppe="${t}" → "${mapped}"`);
+            obs.wxString = mapped;
+          }
+        }
+        // Section 3 marker: stop at 333
+        else if (t === '333') break;
+      }
+
+      // Post-process: recalculate QNH with actual temperature
+      if (obs.slp && obs.temp !== null && obs.elev) {
+        const T = obs.temp + 273.15;
+        const h = obs.elev;
+        obs.altim = Math.round(obs.slp * Math.pow(1 + 0.0065 * h / T, 5.2561) * 10) / 10;
+      }
+
+      // ── Section 3: additional groups after '333' ─────────────
+      // Parse additional sections: Section 3 (after 333) AND Section 5 (after 555)
+      // France and some other countries put gust data in Section 5
+      const sec3Start = tokens.indexOf('333');
+      const sec5Start = tokens.indexOf('555');
+      const additionalTokens = [];
+      if (sec3Start >= 0) additionalTokens.push(...tokens.slice(sec3Start + 1));
+      if (sec5Start >= 0) additionalTokens.push(...tokens.slice(sec5Start + 1));
+      const sec3 = additionalTokens; // renamed variable, both sections combined
+
+      if (sec3.length > 0) {
+        for (const t of sec3) {
+          if (!t || t.length !== 5) continue;
+
+          // SpSp=11 → max instantaneous gust (universal European practice)
+          // SpSp=10 → max 10-min mean wind (fallback if no SpSp=11)
+          // SpSp=07 → mean wind at anemometer height (= Section 1 wind, NOT a gust → skip)
+          if (/^911\d{2}$/.test(t)) {
+            const ff = parseInt(t.slice(3, 5));
+            if (!isNaN(ff) && ff > 0 && ff <= 51) {
+              obs.wgst = (windIndicator <= 2) ? Math.round(ff * 1.944) : ff;
+            }
+          } else if (/^910\d{2}$/.test(t) && !obs.wgst) {
+            // 910ff = highest 10-min mean: use as gust fallback only if no 911ff found
+            const ff = parseInt(t.slice(3, 5));
+            if (!isNaN(ff) && ff > 0 && ff <= 51) {
+              obs._wspd10 = (windIndicator <= 2) ? Math.round(ff * 1.944) : ff;
+            }
+          }
+
+          // Detailed cloud: Ns Ns Cs hs  (amount, genus, height)
+          // Group format: NsNsCshs  where Ns=1-9, Cs=cloud type 0-9, hs=height code
+          // Encoded as 5-char: e.g. "83011" → Ns=3, Cs=0, hs=11
+          // But these are Section 3 specific cloud groups starting with 8:
+          if (/^8[0-9][/0-9][0-9][0-9]$/.test(t)) {
+            const Ns = parseInt(t[1]);  // cloud amount
+            const Cs = t[2];            // cloud genus (may be /)
+            const hss = parseInt(t.slice(3, 5)); // height code
+            if (!isNaN(Ns) && Ns > 0) {
+              // WMO height code → approximate feet AGL
+              const hFt = hss <= 9 ? hss * 100 :
+                hss <= 56 ? (hss - 10) * 300 + 1000 :
+                  hss <= 80 ? (hss - 56) * 1500 + 14500 :
+                    hss <= 88 ? (hss - 80) * 6000 + 50500 : null;
+              const cover = Ns <= 2 ? 'FEW' : Ns <= 4 ? 'SCT' : Ns <= 7 ? 'BKN' : 'OVC';
+              if (hFt !== null) {
+                obs.skyCondition.push({ skyCover: cover, cloudBase: hFt });
+              }
+            }
+          }
+        }
+        // Sort cloud layers by height
+        obs.skyCondition.sort((a, b) => (a.cloudBase || 0) - (b.cloudBase || 0));
+      }
+      // Apply 910ff fallback if no true gust (911ff) was found
+      if (!obs.wgst && obs._wspd10 && obs.wspd && obs._wspd10 > obs.wspd) {
+        obs.wgst = obs._wspd10;
+      }
+      delete obs._wspd10;
+
+      return obs;
+    }
+
+    // WMO ww code → METAR-style wx string approximation
+    // 91-94: Niederschlag *nach* Gewitter (TS nicht mehr aktiv); 17: TS ohne Niederschlag an Station
+    function synopWW(ww) {
+      if (ww >= 95 && ww <= 99) return 'TS';
+      if (ww === 17) return 'TS';
+      if (ww === 94) return 'SN';
+      if (ww === 93) return 'RASN';
+      if (ww === 92) return 'RA';
+      if (ww === 91) return '-RA';
+      if (ww >= 87 && ww <= 90) return '+SHSN';
+      if (ww >= 83 && ww <= 86) return 'SHSN';
+      if (ww >= 80 && ww <= 82) return 'SHRA';
+      if (ww >= 77 && ww <= 79) return 'SN';
+      if (ww >= 73 && ww <= 75) return 'SN';
+      if (ww >= 71 && ww <= 72) return '-SN';
+      if (ww >= 68 && ww <= 69) return 'RASN';
+      if (ww >= 66 && ww <= 67) return 'FZRA';
+      if (ww >= 64 && ww <= 65) return '+RA';
+      if (ww >= 61 && ww <= 63) return 'RA';
+      if (ww >= 58 && ww <= 60) return '-RA';
+      if (ww >= 56 && ww <= 57) return 'FZDZ';
+      if (ww >= 53 && ww <= 55) return 'DZ';
+      if (ww >= 50 && ww <= 52) return '-DZ';
+      if (ww >= 45 && ww <= 49) return 'FG';
+      if (ww >= 41 && ww <= 44) return 'BR';
+      if (ww === 31 || ww === 32) return 'DS';
+      if (ww >= 30) return 'DU';
+      if (ww === 10) return 'BR';
+      return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COLOR HELPERS
+    // ═══════════════════════════════════════════════════════════════
+
+    function lerpColor(stops, val) {
+      if (val <= stops[0].v) return `rgb(${stops[0].r},${stops[0].g},${stops[0].b})`;
+      const last = stops[stops.length - 1];
+      if (val >= last.v) return `rgb(${last.r},${last.g},${last.b})`;
+      for (let i = 0; i < stops.length - 1; i++) {
+        if (val >= stops[i].v && val <= stops[i + 1].v) {
+          const t = (val - stops[i].v) / (stops[i + 1].v - stops[i].v);
+          const r = Math.round(stops[i].r + t * (stops[i + 1].r - stops[i].r));
+          const g = Math.round(stops[i].g + t * (stops[i + 1].g - stops[i].g));
+          const b = Math.round(stops[i].b + t * (stops[i + 1].b - stops[i].b));
+          return `rgb(${r},${g},${b})`;
+        }
+      }
+    }
+
+    const TEMP_S = [
+      { v: -30, r: 0, g: 0, b: 160 }, { v: -10, r: 0, g: 100, b: 220 }, { v: 0, r: 0, g: 200, b: 210 },
+      { v: 10, r: 30, g: 200, b: 80 }, { v: 20, r: 240, g: 220, b: 0 }, { v: 30, r: 255, g: 100, b: 0 }, { v: 40, r: 200, g: 0, b: 0 }
+    ];
+    const WIND_S = [
+      { v: 0, r: 40, g: 190, b: 80 }, { v: 15, r: 240, g: 220, b: 0 }, { v: 25, r: 255, g: 130, b: 0 },
+      { v: 40, r: 210, g: 0, b: 0 }, { v: 65, r: 140, g: 0, b: 200 }
+    ];
+    const PRES_S = [
+      { v: 975, r: 200, g: 0, b: 0 }, { v: 1000, r: 255, g: 160, b: 0 }, { v: 1013, r: 40, g: 190, b: 80 },
+      { v: 1025, r: 0, g: 160, b: 220 }, { v: 1040, r: 0, g: 50, b: 180 }
+    ];
+    const TEND_S = [
+      { v: -6, r: 0, g: 0, b: 200 }, { v: -1, r: 100, g: 180, b: 230 }, { v: 0, r: 180, g: 180, b: 180 },
+      { v: 1, r: 240, g: 180, b: 80 }, { v: 6, r: 200, g: 0, b: 0 }
+    ];
+
+    function contrastFg(rgb) {
+      const m = rgb.match(/\d+/g);
+      if (!m) return '#fff';
+      const [r, g, b] = m.map(Number);
+      return (r * 299 + g * 587 + b * 114) / 1000 < 130 ? '#ffffff' : '#111111';
+    }
+
+    function hexContrastFg(hex) {
+      const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+      return (r * 299 + g * 587 + b * 114) / 1000 < 130 ? '#ffffff' : '#111111';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // METAR PARSING
+    // ═══════════════════════════════════════════════════════════════
+
+    function parseVis(visib) {
+      if (visib === null || visib === undefined) return null;
+      if (visib === '10+') return 16000;
+      const n = parseFloat(visib);
+      if (isNaN(n)) return null;
+      return Math.round(n * 1609.344);
+    }
+
+    function fmtVis(m) {
+      if (m === null) return '—';
+      if (m >= 9999) return '≥10 km';
+      if (m >= 5000) return `${Math.round(m / 1000)} km`;
+      return `${(m / 1000).toFixed(1)} km`;
+    }
+
+    // Normalize sky array: accepts both AWC format {cover,base} and SYNOP {skyCover,cloudBase}
+    function normSky(obs) {
+      // AWC METAR: obs.clouds = [{cover:'BKN', base:400}]
+      // SYNOP:     obs.skyCondition = [{skyCover:'BKN', cloudBase:400}]
+      const awc = obs.clouds || [];
+      const syn = obs.skyCondition || [];
+      const awcN = awc.map(c => ({ skyCover: c.cover, cloudBase: c.base }));
+      // Merge, prefer AWC entries; SYNOP entries fill in
+      return awcN.length ? awcN : syn;
+    }
+
+    function parseCeiling(sky) {
+      if (!sky || !sky.length) return null;
+      if (sky.some(s => ['SKC', 'CLR', 'NSC', 'CAVOK'].includes(s.skyCover))) return null;
+      const layers = sky.filter(s => ['BKN', 'OVC', 'VV'].includes(s.skyCover) && s.cloudBase != null);
+      if (!layers.length) return null;
+      return Math.min(...layers.map(s => s.cloudBase));
+    }
+
+    function getCloudLayer(sky, minFt, maxFt) {
+      if (!sky || !sky.length) return null;
+      const all = sky.filter(s => {
+        if (['SKC', 'CLR', 'NSC', 'CAVOK'].includes(s.skyCover)) return false;
+        return s.cloudBase != null && s.cloudBase >= minFt && s.cloudBase < maxFt;
+      });
+      if (!all.length) return null;
+      all.sort((a, b) => a.cloudBase - b.cloudBase);
+      return all[0];
+    }
+
+    function parseQNH(altim) {
+      if (!altim) return null;
+      // AWC API returns hPa for Q-stations (>200), inHg for A-stations (<100)
+      if (altim > 200) return Math.round(altim);
+      return Math.round(altim * 33.8639);
+    }
+
+    // Color State: unlimited ceiling/vis = best possible
+    function colorState(visMtr, ceilFt) {
+      const v = visMtr ?? Infinity;
+      const c = ceilFt ?? Infinity;
+      for (const s of CS) {
+        if (v >= s.vMtr && c >= s.cFt) return s;
+      }
+      return CS[CS.length - 1];
+    }
+
+    // Extract typed value from obs for a given param
+    function extractVal(obs, pid) {
+      switch (pid) {
+        case 'visibility': return parseVis(obs.visib);
+        case 'ceiling': return parseCeiling(normSky(obs));
+        case 'colorstate': return colorState(parseVis(obs.visib), parseCeiling(normSky(obs)));
+        case 'clouds_lo': return getCloudLayer(normSky(obs), 0, 6500);
+        case 'clouds_mi': return getCloudLayer(normSky(obs), 6500, 20000);
+        case 'clouds_hi': return getCloudLayer(normSky(obs), 20000, 99999);
+        case 'wind_barb': return { spd: obs.wspd ?? 0, dir: obs.wdir };
+        case 'wind_dir': return (obs.wdir && obs.wdir !== 'VRB') ? parseInt(obs.wdir) : null;
+        case 'wind_speed': return obs.wspd ?? null;
+        case 'wind_gust': return obs.wgst ?? null;
+        case 'pressure': return parseQNH(obs.altim) ?? (obs.slp ? Math.round(obs.slp) : null);
+        case 'pres_tend': return obs.presTend ?? null;
+        case 'ww': return obs.wxString || null;
+        case 'temperature': return obs.temp ?? null;
+        case 'dewpoint': return obs.dewp ?? null;
+      }
+      return null;
+    }
+
+    // Returns {bg, fg} for a given param+value
+    function paramColor(pid, val) {
+      const none = { bg: '#1a2535', fg: '#3a5570' };
+      if (val === null || val === undefined) return none;
+
+      switch (pid) {
+        case 'visibility': {
+          const s = colorState(val, Infinity); return { bg: s.bg, fg: s.fg };
+        }
+        case 'ceiling': {
+          const s = colorState(Infinity, val); return { bg: s.bg, fg: s.fg };
+        }
+        case 'colorstate': {
+          if (!val) return none; return { bg: val.bg, fg: val.fg };
+        }
+        case 'clouds_lo': case 'clouds_mi': case 'clouds_hi': {
+          if (!val) return { bg: '#0d1a28', fg: '#2a4a6a' };
+          const MAP = {
+            FEW: { bg: '#0d3060', fg: '#6ab8ff' }, SCT: { bg: '#0d5535', fg: '#70ffb0' },
+            BKN: { bg: '#4a3800', fg: '#ffcc44' }, OVC: { bg: '#333', fg: '#ccc' }, VV: { bg: '#2a1a1a', fg: '#ff8888' }
+          };
+          return MAP[val.skyCover] || none;
+        }
+        case 'wind_barb': case 'wind_speed': case 'wind_gust': {
+          const spd = typeof val === 'object' ? val.spd : val;
+          const bg = lerpColor(WIND_S, spd); return { bg, fg: contrastFg(bg) };
+        }
+        case 'wind_dir': return { bg: '#0d2840', fg: '#4ab8f0' };
+        case 'pressure': {
+          const bg = lerpColor(PRES_S, val); return { bg, fg: contrastFg(bg) };
+        }
+        case 'pres_tend': {
+          const bg = lerpColor(TEND_S, val); return { bg, fg: contrastFg(bg) };
+        }
+        case 'ww': {
+          // Aktives TS: TS am Wortanfang oder nach +/-/VC — NICHT RETS (vergangenes Gewitter)
+          const wx = val.toLowerCase();
+          if (/(?:^|[+\-]|vc)ts/.test(wx)) return { bg: '#4a0080', fg: '#e0a0ff' };
+          if (wx.includes('sn') || wx.includes('sg')) return { bg: '#a0c4e0', fg: '#001040' };
+          if (wx.includes('ra') || wx.includes('dz')) return { bg: '#0a3a7a', fg: '#80c8ff' };
+          if (wx.includes('fzra') || wx.includes('fzdz')) return { bg: '#003060', fg: '#70e0ff' };
+          if (wx.includes('fg') || wx.includes('br')) return { bg: '#30301a', fg: '#cccc80' };
+          if (wx.includes('hz')) return { bg: '#4a4020', fg: '#ddcc80' };
+          return { bg: '#1a2535', fg: '#7aaac0' };
+        }
+        case 'temperature': case 'dewpoint': {
+          const bg = lerpColor(TEMP_S, val); return { bg, fg: contrastFg(bg) };
+        }
+      }
+      return none;
+    }
+
+    // Format value to display string
+    function fmtVal(pid, val) {
+      if (val === null || val === undefined) return '—';
+      switch (pid) {
+        case 'visibility': return val >= 9999 ? '≥10' : val >= 5000 ? `${Math.round(val / 1000)}` : `${(val / 1000).toFixed(1)}`;
+        case 'ceiling': return val != null ? `${String(Math.round(val / 100)).padStart(3, '0')}` : 'CAV';
+        case 'colorstate': return val ? val.abbr : '?';
+        case 'clouds_lo': case 'clouds_mi': case 'clouds_hi':
+          return val ? `${val.skyCover}${String(Math.round(val.cloudBase / 100)).padStart(3, '0')}` : '—';
+        case 'wind_barb': return null; // SVG only
+        case 'wind_dir': return val != null ? `${val}°` : 'VRB';
+        case 'wind_speed': case 'wind_gust': return val != null ? `${Math.round(val)}` : '—';
+        case 'pressure': return val ? `${val}` : '—';
+        case 'pres_tend': return val != null ? (val >= 0 ? `+${val.toFixed(1)}` : `${val.toFixed(1)}`) : '—';
+        case 'ww': return val || '—';
+        case 'temperature': case 'dewpoint': return val != null ? `${val.toFixed(1)}` : '—';
+      }
+      return '—';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WIND BARB SVG
+    // ═══════════════════════════════════════════════════════════════
+
+    function windBarbSVG(speedKt, dirRaw, clr = '#ffffff') {
+      // Calm: circle only
+      if (speedKt < 2.5) {
+        return `<svg width="50" height="50" viewBox="-25 -25 50 50" xmlns="http://www.w3.org/2000/svg">
+      <circle r="8" fill="none" stroke="${clr}" stroke-width="1.8"/>
+      <circle r="2.5" fill="${clr}"/>
+    </svg>`;
+      }
+      const spd5 = Math.round(speedKt / 5) * 5;
+      let rem = spd5;
+      // Shaft: from station (0,0) upward to (-24 = tip of tail)
+      // Feathers attach at tip and go downward along shaft; each feather extends
+      // PERPENDICULAR to shaft = purely in +x direction
+      const SHAFT_LEN = 24;
+      const BARB_LEN = 12;   // full barb length (perpendicular)
+      const HALF_LEN = 7;   // half barb
+      const STEP = 5;   // spacing between barbs along shaft
+      const els = [];
+      els.push(`<circle cx="0" cy="0" r="2.5" fill="${clr}"/>`);
+      els.push(`<line x1="0" y1="0" x2="0" y2="${-SHAFT_LEN}" stroke="${clr}" stroke-width="1.8"/>`);
+
+      // Start placing barbs from the tip
+      let y = -SHAFT_LEN;
+
+      // Pennants (50 kt) – filled triangle, tip at shaft
+      while (rem >= 50) {
+        // Triangle: shaft point, barb end, and one step down the shaft
+        els.push(`<polygon points="0,${y} ${BARB_LEN},${y} 0,${y + STEP}"
+      fill="${clr}" stroke="none"/>`);
+        y += STEP; rem -= 50;
+      }
+      // After pennants leave a small gap before barbs
+      if (spd5 - rem > 0 && rem > 0) y += 2;
+
+      // Full barbs (10 kt) – horizontal line to the right
+      while (rem >= 10) {
+        els.push(`<line x1="0" y1="${y}" x2="${BARB_LEN}" y2="${y}"
+      stroke="${clr}" stroke-width="1.8" stroke-linecap="round"/>`);
+        y += STEP; rem -= 10;
+      }
+
+      // Half barb (5 kt) – shorter, and if it is the only barb shift it slightly
+      if (rem >= 5) {
+        const yy = (spd5 === 5) ? y - 2 : y;
+        els.push(`<line x1="0" y1="${yy}" x2="${HALF_LEN}" y2="${yy}"
+      stroke="${clr}" stroke-width="1.8" stroke-linecap="round"/>`);
+      }
+
+      const dir = (!dirRaw || dirRaw === 'VRB') ? 0 : parseInt(dirRaw);
+      const light = ['light', 'topo'].includes(activeTile);
+      const filter = light
+        ? `<defs><filter id="bf"><feMorphology operator="dilate" radius="0.6"/><feFlood flood-color="#ffffff" result="c"/><feComposite in="c" in2="SourceGraphic" operator="in"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`
+        : '';
+      const gAttr = light ? ' filter="url(#bf)"' : '';
+      return `<svg width="50" height="50" viewBox="-25 -25 50 50" xmlns="http://www.w3.org/2000/svg">
+    ${filter}<g transform="rotate(${dir})"${gAttr}>${els.join('')}</g>
+  </svg>`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WMO PRESENT WEATHER SYMBOLS (SVG) — REVISED
+    // ═══════════════════════════════════════════════════════════════
+
+    const WX_CLR = {
+      liq: '#00e090',  // grün  – flüssiger Niederschlag (RA, DZ, SH)
+      snow: '#e0a0ff',  // lila  – fester Niederschlag (SN, SG, IC)
+      haz: '#ff4444',  // rot   – Gefahren (FZ, TS, GR, SQ, FC)
+      fog: '#ffb000',  // gelb  – Nebel / Sichteinschränkung (FG, BR, HZ)
+      dust: '#d4a050',  // braun – Staub / Sand (DU, SA, PO)
+    };
+
+    function wxSvg(inner, w = 34, h = 34) {
+      return `<svg width="22" height="22" viewBox="0 0 34 34"
+    xmlns="http://www.w3.org/2000/svg" style="display:block;overflow:visible;">${inner}</svg>`;
+    }
+
+    // ── Basis-Formen (Primitives) ────────────────────────────────
+
+    function dot(cx, cy, clr, r = 2.6) {
+      return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${clr}"/>`;
+    }
+
+    function comma(cx, cy, clr) {
+      return `<circle cx="${cx}" cy="${cy}" r="1.8" fill="${clr}"/>` +
+        `<path d="M${cx},${cy + 1.5} C${cx + 3},${cy + 4} ${cx + 1},${cy + 8} ${cx - 1},${cy + 8}" stroke="${clr}" stroke-width="1.6" fill="none" stroke-linecap="round"/>`;
+    }
+
+    function star(cx, cy, clr, r = 4.5) {
+      return [0, 60, 120].map(a => {
+        const rd = a * Math.PI / 180, dx = r * Math.cos(rd), dy = r * Math.sin(rd);
+        return `<line x1="${(cx - dx).toFixed(1)}" y1="${(cy - dy).toFixed(1)}" x2="${(cx + dx).toFixed(1)}" y2="${(cy + dy).toFixed(1)}" stroke="${clr}" stroke-width="1.8" stroke-linecap="round"/>`;
+      }).join('');
+    }
+
+    // Dreiecke (Basis immer unten)
+    function triFilled(cx, cy, clr, s = 6) { // GR (Hagel) - Komplett gefüllt
+      return `<polygon points="${cx},${cy - s * 0.8} ${cx - s},${cy + s * 0.7} ${cx + s},${cy + s * 0.7}" fill="${clr}" stroke="${clr}" stroke-width="1"/>`;
+    }
+
+    function triEmpty(cx, cy, clr, s = 6) { // GS (Graupel) - Leer
+      return `<polygon points="${cx},${cy - s * 0.8} ${cx - s},${cy + s * 0.7} ${cx + s},${cy + s * 0.7}" fill="none" stroke="${clr}" stroke-width="1.8" stroke-linejoin="round"/>`;
+    }
+
+    function triDot(cx, cy, clr, s = 6) { // PL/PE (Ice Pellets) - Leer mit Punkt
+      return triEmpty(cx, cy, clr, s) + `<circle cx="${cx}" cy="${cy + s * 0.2}" r="1.5" fill="${clr}"/>`;
+    }
+
+    function vcParens(clr) {
+      return `<path d="M8,4 Q2,17 8,30 M26,4 Q32,17 26,30" stroke="${clr}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    }
+
+    // ── Positionsraster für Intensität ───────────────────────────
+
+    function precipPos(intens) {
+      if (intens === 'light') return [[12, 17], [22, 17]]; // 2 nebeneinander
+      if (intens === 'moderate') return [[17, 12], [12, 21], [22, 21]]; // Dreieck
+      return [[17, 8], [11, 17], [23, 17], [17, 26]]; // heavy = Raute
+    }
+
+    function precipPosFZ(intens) { // Nach rechts verschoben für die ~ Welle
+      if (intens === 'light') return [[18, 17], [26, 17]];
+      if (intens === 'moderate') return [[22, 12], [18, 21], [26, 21]];
+      return [[18, 12], [26, 12], [18, 22], [26, 22]]; // heavy
+    }
+
+    // ── Komplexe Bausteine ───────────────────────────────────────
+
+    function tsBolt(clr) { // WMO Blitz (TS)
+      const y = 12, xL = 8, xR = 26;
+      return `<line x1="${xL}" y1="${y}" x2="${xR}" y2="${y}" stroke="${clr}" stroke-width="2.2" stroke-linecap="round"/>` +
+        `<line x1="${xL}" y1="${y}" x2="${xL}" y2="28" stroke="${clr}" stroke-width="2.2" stroke-linecap="round"/>` +
+        `<polyline points="${xR},${y} ${xR - 6},${y + 7} ${xR},${y + 14} ${xR - 8},28" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+
+    function showerTri(clr, intens) { // Schauer-Dreieck (Spitze unten)
+      const tri = `<polygon points="10,13 24,13 17,29" fill="none" stroke="${clr}" stroke-width="2" stroke-linejoin="round"/>`;
+      let bars = '';
+      if (intens === 'moderate') bars = `<line x1="13" y1="20" x2="21" y2="20" stroke="${clr}" stroke-width="2"/>`;
+      if (intens === 'heavy') bars = `<line x1="12" y1="18" x2="22" y2="18" stroke="${clr}" stroke-width="2"/><line x1="14" y1="23" x2="20" y2="23" stroke="${clr}" stroke-width="2"/>`;
+      return tri + bars;
+    }
+
+    function fogLines(type, clr) {
+      const line = (y, dash = false) => `<line x1="5" y1="${y}" x2="29" y2="${y}" stroke="${clr}" stroke-width="2.2" stroke-linecap="round" ${dash ? 'stroke-dasharray="7,5"' : ''}/>`;
+      const splitLine = (y) => `<path d="M5,${y} L14,${y} M20,${y} L29,${y}" stroke="${clr}" stroke-width="2.2" stroke-linecap="round"/>`;
+
+      if (type === 'BR') return line(13) + line(21);
+      if (type === 'MIFG') return line(13, true) + line(21);
+      if (type === 'BCFG') return splitLine(11) + line(17) + splitLine(23); // Oben/Unten Lücke, Mitte durchgezogen
+      if (type === 'PRFG') return splitLine(11) + line(17) + line(23);      // Nur oben Lücke
+      if (type === 'FZFG') return line(11) + line(17) + line(23) + `<polyline points="12,11 17,23 22,11" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linejoin="round"/>`;
+      return line(11) + line(17) + line(23); // Normal FG
+    }
+
+    function freezingS(intens, isRain, clr) {
+      // Liegendes S (Tilde)
+      const sPath = `<path d="M6,17 C6,7 17,7 17,17 C17,27 28,27 28,17" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+      const leftDrop = isRain ? dot(11.5, 12, clr) : comma(11.5, 12, clr);
+      const rightDrop = isRain ? dot(22.5, 22, clr) : comma(22.5, 22, clr);
+
+      // Bei leicht (-) nur links, bei moderat/stark beidseitig
+      return sPath + leftDrop + (intens === 'light' ? '' : rightDrop);
+    }
+
+    function blowingArrows(clr, isDrifting) {
+      // Pfeil horizontal nach rechts
+      const hArr = `<path d="M9,17 L25,17 M21,13 L25,17 L21,21" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+      // Pfeil vertikal (BLSN = Spitze unten, DRSN = Spitze oben)
+      const vArr = isDrifting
+        ? `<path d="M17,25 L17,9 M13,13 L17,9 L21,13" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`
+        : `<path d="M17,9 L17,25 M13,21 L17,25 L21,21" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+      return hArr + vArr;
+    }
+
+    function dustStorm(clr, heavy = false) {
+      // Stehendes S
+      const sPath = `<path d="M17,24 C10,24 10,17 17,17 C24,17 24,10 17,10" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+      // Pfeil in der Mitte (oder zwei Pfeile bei heavy)
+      let arrows = `<path d="M9,17 L25,17 M21,13 L25,17 L21,21" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+      if (heavy) {
+        arrows = `<path d="M7,15 L23,15 M19,11 L23,15 L19,19" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>` +
+          `<path d="M11,19 L27,19 M23,15 L27,19 L23,23" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+      }
+      return sPath + arrows;
+    }
+
+    function dustDevil(clr) { // PO (Dust Devil) - Spirale
+      // Ein durchgehender Pfad, der die drei Schlaufen der Spirale zeichnet
+      const path = `M13,26 C13,32 21,32 21,25 C21,19 13,23 13,17 C13,11 21,15 21,9 C21,3 13,3 13,9`;
+      return `<path d="${path}" stroke="${clr}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN BUILDER
+    // ═══════════════════════════════════════════════════════════════
+
+    function wxSymbolSVG(wxStr) {
+      if (!wxStr || wxStr === 'CAVOK') return null;
+      const wx = wxStr.toUpperCase().trim();
+      const heavy = wx.includes('+');
+      const light = wx.includes('-');
+      const intens = heavy ? 'heavy' : light ? 'light' : 'moderate';
+      const isVC = wx.includes('VC');
+      const { liq, snow, haz, fog, dust } = WX_CLR;
+
+      // 1. Extreme Hazards
+      if (wx.includes('FC')) return wxSvg(`<path d="M7,7 C17,10 17,20 12,28 M27,7 C17,10 17,20 22,28" stroke="${haz}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`);
+      if (wx.includes('SQ')) return wxSvg(`<path d="M10,12 L17,26 L24,12 C24,22 10,22 10,12 Z" stroke="${haz}" stroke-width="2" fill="none" stroke-linejoin="round"/>`);
+
+      if (wx.includes('PO')) {
+        let inner = dustDevil(dust);
+        if (isVC) return wxSvg(inner + vcParens(dust));
+        return wxSvg(inner);
+      }
+
+      // PO (Dust Devil) - Zwei ineinander verschlungene S
+      if (wx.includes('PO')) return wxSvg(
+        `<path d="M14,24 C8,24 8,14 14,14 C20,14 20,24 14,24 Z" stroke="${dust}" stroke-width="2" fill="none" stroke-linecap="round"/>` +
+        `<path d="M20,10 C26,10 26,20 20,20 C14,20 14,10 20,10 Z" stroke="${dust}" stroke-width="2" fill="none" stroke-linecap="round"/>`
+      );
+
+      // 2. Thunderstorms (TS)
+      if (wx.includes('TS')) {
+        // VCTS - Winkel nach rechts offen mit kleiner Pfeilspitze unten
+        if (isVC && !wx.includes('SH') && !wx.includes('RA') && !wx.includes('SN') && !wx.includes('GR') && !wx.includes('GS') && !wx.includes('PL') && !wx.includes('PE') && !wx.includes('DZ')) {
+          return wxSvg(`<polyline points="10,8 24,17 10,26" stroke="${haz}" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/><polyline points="15,25 10,26 12,21" stroke="${haz}" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`);
+        }
+
+        let inner = tsBolt(haz);
+        if (wx.includes('RA')) inner += dot(17, 6, liq, 2.5);
+        else if (wx.includes('SN')) inner += star(17, 6, snow, 3.5);
+        else if (wx.includes('GR')) inner += triFilled(17, 6, haz, 3.5); // Fehler behoben
+        else if (wx.includes('GS')) inner += triEmpty(17, 6, haz, 3.5);  // Fehler behoben
+        else if (wx.includes('PL') || wx.includes('PE')) inner += triDot(17, 6, haz, 3.5); // Fehler behoben
+        else if (wx.includes('DZ')) inner += comma(17, 6, liq);
+
+        if (isVC && !wx.includes('SH')) return wxSvg(inner + vcParens(haz));
+        return wxSvg(inner);
+      }
+
+      // 3. Showers (SH)
+      if (wx.includes('SH') || (isVC && (wx.includes('RA') || wx.includes('SN') || wx.includes('GR')))) {
+        let sColor = wx.includes('SN') ? snow : liq;
+        if (wx.includes('GR') || wx.includes('GS') || wx.includes('PL') || wx.includes('PE')) sColor = haz;
+
+        let inner = showerTri(sColor, intens);
+        if (wx.includes('GR')) inner += triFilled(17, 6, haz, 3.5); // Fehler behoben
+        else if (wx.includes('GS')) inner += triEmpty(17, 6, haz, 3.5);  // Fehler behoben
+        else if (wx.includes('PL') || wx.includes('PE')) inner += triDot(17, 6, haz, 3.5); // Fehler behoben
+        else if (wx.includes('SN')) inner += star(17, 6, snow, 3.5);
+        else if (wx.includes('RA') || !wx.includes('SH')) inner += dot(17, 6, liq, 2.5);
+
+        if (isVC) return wxSvg(inner + vcParens(sColor));
+        return wxSvg(inner);
+      }
+
+      // 4. Freezing (FZ)
+      if (wx.includes('FZ')) {
+        if (wx.includes('RA')) return wxSvg(freezingS(intens, true, haz));
+        if (wx.includes('DZ')) return wxSvg(freezingS(intens, false, haz));
+        if (wx.includes('FG')) return wxSvg(fogLines('FZFG', haz));
+      }
+
+      // 5. Solid Precip
+      if (wx.includes('PL') || wx.includes('PE')) {
+        // Ein großes, leeres Dreieck mit Punkt in der Mitte
+        return wxSvg(
+          `<polygon points="17,9 9,25 25,25" fill="none" stroke="${haz}" stroke-width="2.2" stroke-linejoin="round"/>` +
+          `<circle cx="17" cy="20" r="2.5" fill="${haz}"/>`
+        );
+      }
+      if (wx.includes('GR')) {
+        // Ein großes, komplett rot gefülltes Dreieck
+        return wxSvg(
+          `<polygon points="17,9 9,25 25,25" fill="${haz}" stroke="${haz}" stroke-width="2" stroke-linejoin="round"/>`
+        );
+      }
+      if (wx.includes('GS')) {
+        // Ein großes, leeres Dreieck
+        return wxSvg(
+          `<polygon points="17,9 9,25 25,25" fill="none" stroke="${haz}" stroke-width="2.2" stroke-linejoin="round"/>`
+        );
+      }
+
+      if (wx.includes('SG')) {
+        return wxSvg(`<line x1="6" y1="22" x2="28" y2="22" stroke="${snow}" stroke-width="2" stroke-linecap="round"/><polygon points="17,12 13,19 21,19" fill="${snow}"/>`);
+      }
+      if (wx.includes('IC')) {
+        return wxSvg(`<line x1="6" y1="22" x2="28" y2="22" stroke="${snow}" stroke-width="2" stroke-linecap="round"/>` + star(17, 13, snow, 4.5));
+      }
+
+      // Mixed Precip
+      if (wx.includes('RASN') || wx.includes('SNRA')) {
+        return wxSvg(star(17, 8, snow, 4) + dot(17, 17, liq, 3) + star(17, 26, snow, 4));
+      }
+      if (wx.includes('RADZ') || wx.includes('DZRA')) {
+        return wxSvg(dot(17, 8, liq, 3) + comma(17, 17, liq) + dot(17, 26, liq, 3));
+      }
+
+      // Pure Rain/Snow/Drizzle
+      if (wx.includes('SN')) {
+        const p = precipPos(intens); return wxSvg(p.map(([x, y]) => star(x, y, snow)).join(''));
+      }
+      if (wx.includes('RA')) {
+        const p = precipPos(intens); return wxSvg(p.map(([x, y]) => dot(x, y, liq)).join(''));
+      }
+      if (wx.includes('DZ')) {
+        const p = precipPos(intens); return wxSvg(p.map(([x, y]) => comma(x, y, liq)).join(''));
+      }
+
+      // Virga
+      if (wx.includes('VIRGA')) {
+        return wxSvg(
+          `<path d="M10,19 C14,26 20,26 24,19" stroke="${liq}" stroke-width="2.2" fill="none" stroke-linecap="round"/>` +
+          dot(17, 12, liq)
+        );
+      }
+
+      // 6. Blowing / Drifting Snow
+      if (wx.includes('BLSN')) return wxSvg(blowingArrows(snow, false));
+      if (wx.includes('DRSN')) return wxSvg(blowingArrows(snow, true));
+
+      // 7. Obscurations
+      if (wx.includes('MIFG')) return wxSvg(fogLines('MIFG', fog));
+      if (wx.includes('BCFG')) return wxSvg(fogLines('BCFG', fog));
+      if (wx.includes('PRFG')) return wxSvg(fogLines('PRFG', fog));
+      if (wx.includes('VCFG')) return wxSvg(fogLines('VCFG', fog) + vcParens(fog));
+      if (wx.includes('FG')) return wxSvg(fogLines('FG', fog));
+      if (wx.includes('BR')) return wxSvg(fogLines('BR', fog));
+
+      if (wx.includes('HZ')) return wxSvg(`<path d="M8,17 C8,10 17,10 17,17 C17,24 26,24 26,17 C26,10 17,10 17,17 C17,24 8,24 8,17" stroke="${fog}" stroke-width="2" fill="none"/>`);
+
+      // FU / VA - Senkrechter Strich mit Schlangenlinie rechts
+      if (wx.includes('FU') || wx.includes('VA')) return wxSvg(
+        `<line x1="10" y1="8" x2="10" y2="26" stroke="#999" stroke-width="2.2" stroke-linecap="round"/>` +
+        `<path d="M10,10 C16,6 16,16 22,12 C26,10 26,16 22,18" stroke="#999" stroke-width="2" fill="none" stroke-linecap="round"/>`
+      );
+
+      // VCSS / VCDS - Stehendes S durchgestrichen mit Pfeil, in Klammern
+      if (wx.includes('VCSS') || wx.includes('VCDS')) {
+        const sPath = `M22,10 C22,5 12,5 12,11 C12,16 22,18 22,23 C22,29 12,29 12,24`;
+        const arrow = `M9,17 L25,17 M21,13 L25,17 L21,21`;
+        return wxSvg(
+          `<path d="${sPath}" stroke="${dust}" stroke-width="2.2" fill="none" stroke-linecap="round"/>` +
+          `<path d="${arrow}" stroke="${dust}" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>` +
+          vcParens(dust)
+        );
+      }
+
+      // SS / DS - Normaler Staub-/Sandsturm
+      if (wx.includes('SS') || wx.includes('DS')) return wxSvg(dustStorm(dust, heavy));
+
+      // SA, BLSA, BLDU, BLPY - Stehendes S mit senkrechtem Strich ($)
+      if (wx.includes('BLDU') || wx.includes('BLSA') || wx.includes('SA') || wx.includes('BLPY') || wx.includes('VCSA')) {
+        const sPath = `M22,10 C22,5 12,5 12,11 C12,16 22,18 22,23 C22,29 12,29 12,24`;
+        let inner = `<path d="${sPath}" stroke="${dust}" stroke-width="2.2" fill="none" stroke-linecap="round"/>` +
+          `<line x1="17" y1="4" x2="17" y2="30" stroke="${dust}" stroke-width="2.2" stroke-linecap="round"/>`;
+        if (isVC) return wxSvg(inner + vcParens(dust));
+        return wxSvg(inner);
+      }
+
+      // DU - Nur das stehende S
+      if (wx.includes('DU')) {
+        const sPath = `M22,10 C22,5 12,5 12,11 C12,16 22,18 22,23 C22,29 12,29 12,24`;
+        let inner = `<path d="${sPath}" stroke="${dust}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`;
+        if (isVC) return wxSvg(inner + vcParens(dust));
+        return wxSvg(inner);
+      }
+
+      return null;
+    }
+
+    // Wrapper: symbol in glowing box, or text fallback
+    function wxMarkerContent(wxVal, opacity) {
+      const svg = wxSymbolSVG(wxVal);
+      if (!svg) {
+        const c = paramColor('ww', wxVal);
+        return { html: mkBox(wxVal.slice(0, 6), c.bg, c.fg), w: estW(wxVal.slice(0, 6)), h: 22 };
+      }
+      const wx = (wxVal || '').toUpperCase();
+      let glowClr = '#444';
+      if (wx.includes('TS') || wx.includes('FZ') || wx.includes('GR') || wx.includes('GS') || wx.includes('PL') || wx.includes('SQ'))
+        glowClr = WX_CLR.haz;
+      else if (wx.includes('SN') || wx.includes('IC') || wx.includes('SG') || wx.includes('BLSN'))
+        glowClr = WX_CLR.snow;
+      else if (wx.includes('RA') || wx.includes('DZ') || wx.includes('SH'))
+        glowClr = WX_CLR.liq;
+      else if (wx.includes('FG') || wx.includes('BR') || wx.includes('HZ'))
+        glowClr = WX_CLR.fog;
+      else if (wx.includes('DU') || wx.includes('SA') || wx.includes('DS') || wx.includes('SS'))
+        glowClr = WX_CLR.dust;
+
+      const html = `<div style="opacity:${opacity.toFixed(2)};background:rgba(8,12,20,.85);` +
+        `border:1.5px solid ${glowClr};border-radius:4px;padding:1px 2px;` +
+        `box-shadow:0 0 5px ${glowClr}66;cursor:pointer;">${svg}</div>`;
+      return { html, w: 26, h: 26 };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MARKER CREATION
+    // ═══════════════════════════════════════════════════════════════
+
+    const centeredIcon = (html, w = 60, h = 22) =>
+      L.divIcon({ html, className: '', iconSize: [w, h], iconAnchor: [w / 2, h / 2] });
+
+    function mkBox(text, bg, fg, extra = '') {
+      return `<div style="background:${bg};color:${fg};padding:2px 6px;border-radius:4px;
+    font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;
+    border:1px solid rgba(255,255,255,.22);box-shadow:0 2px 6px rgba(0,0,0,.55);
+    cursor:pointer;white-space:nowrap;${extra}">${text}</div>`;
+    }
+
+    // Build a properly-sized Leaflet divIcon – avoids the overflow:hidden trap
+    function mkDivIcon(html, w, h, opacity = 1.0) {
+      return L.divIcon({
+        html: `<div style="opacity:${opacity.toFixed(2)}">${html}</div>`,
+        className: '',
+        iconSize: [w, h],
+        iconAnchor: [Math.round(w / 2), Math.round(h / 2)]
+      });
+    }
+
+    // Estimate pixel width of text in JetBrains Mono 11px bold
+    function estW(text) { return Math.round(text.length * 7.5 + 14); }
+    function ageOpacity(ageMin) {
+      if (ageMin <= 30) return 1.0;
+      if (ageMin >= 90) return 0.35;
+      return 1.0 - 0.65 * (ageMin - 30) / 60;
+    }
+
+    function createMarker(obs, params) {
+      const pos = [obs.lat, obs.lon];
+      const opacity = ageOpacity(obs._ageMin || 0);
+
+      if (params.length === 1 && params[0] === 'wind_barb') {
+        const val = extractVal(obs, 'wind_barb');
+        const clr = barbColor();
+        const svg = windBarbSVG(val.spd, val.dir, clr);
+        const icon = L.divIcon({
+          html: `<div style="opacity:${opacity.toFixed(2)}">${svg}</div>`,
+          className: '', iconSize: [50, 50], iconAnchor: [25, 25]
+        });
+        return buildMarker(pos, icon, obs);
+
+      } else if (params.length === 2 && params.includes('wind_barb')) {
+        const other = params.find(p => p !== 'wind_barb');
+        const wv = extractVal(obs, 'wind_barb');
+        const ov = extractVal(obs, other);
+        const oc = paramColor(other, ov);
+        const oTxt = fmtVal(other, ov);
+        const svg = windBarbSVG(wv.spd, wv.dir, barbColor());
+        const box = mkBox(oTxt, oc.bg, oc.fg);
+        const bw = estW(oTxt);
+        const icon = L.divIcon({
+          html: `<div style="opacity:${opacity.toFixed(2)};display:flex;align-items:center;gap:2px;">${svg}${box}</div>`,
+          className: '', iconSize: [50 + bw, 50], iconAnchor: [25, 25]
+        });
+        return buildMarker(pos, icon, obs);
+
+      } else if (params.length === 1) {
+        const val = extractVal(obs, params[0]);
+        // WW: render WMO symbol instead of text
+        if (params[0] === 'ww' && val) {
+          const mc = wxMarkerContent(val, opacity);
+          const icon = L.divIcon({
+            html: mc.html, className: '',
+            iconSize: [mc.w, mc.h], iconAnchor: [Math.round(mc.w / 2), Math.round(mc.h / 2)]
+          });
+          return buildMarker(pos, icon, obs);
+        }
+        const c = paramColor(params[0], val);
+        const txt = fmtVal(params[0], val);
+        const w = estW(txt), h = 22;
+        const icon = mkDivIcon(mkBox(txt, c.bg, c.fg), w, h, opacity);
+        return buildMarker(pos, icon, obs);
+
+      } else { // 2 params
+        const v1 = extractVal(obs, params[0]), v2 = extractVal(obs, params[1]);
+        // If one param is ww, render symbol + text side-by-side
+        const wwIdx = params.indexOf('ww');
+        if (wwIdx >= 0) {
+          const wxVal = wwIdx === 0 ? v1 : v2;
+          const othPid = wwIdx === 0 ? params[1] : params[0];
+          const othVal = wwIdx === 0 ? v2 : v1;
+          const mc = wxMarkerContent(wxVal || '—', opacity);
+          const oc = paramColor(othPid, othVal);
+          const otxt = fmtVal(othPid, othVal);
+          const bw = estW(otxt);
+          const html = `<div style="display:flex;align-items:center;gap:3px;opacity:${opacity.toFixed(2)};">
+        ${mc.html}
+        ${mkBox(otxt, oc.bg, oc.fg)}
+      </div>`;
+          const icon = L.divIcon({
+            html, className: '',
+            iconSize: [mc.w + bw + 6, 26], iconAnchor: [Math.round((mc.w + bw + 6) / 2), 13]
+          });
+          return buildMarker(pos, icon, obs);
+        }
+        const c1 = paramColor(params[0], v1), c2 = paramColor(params[1], v2);
+        const t1 = fmtVal(params[0], v1), t2 = fmtVal(params[1], v2);
+        const w = estW(t1) + estW(t2), h = 22;
+        const html = `<div style="display:flex;border-radius:4px;overflow:hidden;
+      border:1px solid rgba(255,255,255,.22);box-shadow:0 2px 6px rgba(0,0,0,.55);cursor:pointer;">
+      <div style="background:${c1.bg};color:${c1.fg};padding:2px 6px;
+        font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;white-space:nowrap;">${t1}</div>
+      <div style="background:${c2.bg};color:${c2.fg};padding:2px 6px;
+        font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;
+        white-space:nowrap;border-left:1px solid rgba(255,255,255,.18);">${t2}</div>
+    </div>`;
+        const icon = mkDivIcon(html, w, h, opacity);
+        return buildMarker(pos, icon, obs);
+      }
+    }
+
+    function buildMarker(pos, icon, obs) {
+      const m = L.marker(pos, { icon });
+      m.bindTooltip(tooltipHTML(obs), { className: 'metar-tt', direction: 'top', offset: [0, -4] });
+      m.bindPopup(popupHTML(obs), { maxWidth: 420 });
+      return m;
+    }
+
+    function tooltipHTML(obs) {
+      const elev = obs.elev != null ? `${Math.round(obs.elev)} m ü.NN` : '';
+      const srcClr = obs.metarType === 'SYNOP-BUFR' ? '#00e090'
+        : obs.metarType === 'SYNOP' ? '#ffb000'
+          : '#00d4ff';
+      const srcLabel = obs.metarType || 'METAR';
+      return `<div style="background:rgba(8,12,20,.9);border:1px solid #1d2d42;padding:6px 10px;
+    border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;
+    box-shadow:0 4px 16px rgba(0,0,0,.7);">
+    <span style="color:${srcClr};font-weight:700;font-size:14px;">${obs.icaoId}</span>
+    <span style="color:${srcClr};font-size:9px;margin-left:6px;opacity:.7;">${srcLabel}</span>
+    <br><span style="color:#7a9ab8;font-family:'Inter',sans-serif;font-size:11px;">${obs.name || ''}</span>
+    ${elev ? `<br><span style="color:#4d6e8a;font-size:10px;">${elev}</span>` : ''}
+  </div>`;
+    }
+
+    function popupHTML(obs) {
+      const v = parseVis(obs.visib);
+      const ceil = parseCeiling(obs.skyCondition);
+      const cs = colorState(v, ceil);
+      const qnh = parseQNH(obs.altim);
+      const _td = obs.obsTime ? new Date(obs.obsTime * 1000) : null;
+      const t = _td
+        ? `${String(_td.getUTCDate()).padStart(2, '0')}. `
+        + ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'][_td.getUTCMonth()]
+        + ` ${_td.getUTCFullYear()}  ${String(_td.getUTCHours()).padStart(2, '0')}:${String(_td.getUTCMinutes()).padStart(2, '0')} UTC`
+        : '—';
+      const elev = obs.elev != null ? `${Math.round(obs.elev)} m` : '—';
+
+      const skyHTML = normSky(obs).map(s =>
+        `<span class="sky-chip">${s.skyCover}${s.cloudBase != null ? ' ' + String(Math.round(s.cloudBase / 100)).padStart(3, '0') + 'hft' : ''}</span>`
+      ).join('');
+
+      const rows = [
+        ['Sicht', fmtVis(v)],
+        ['Ceiling', ceil != null ? `${Math.round(ceil / 100)} hft (${ceil} ft)` : 'CAVOK/kein'],
+        ['Temperatur', obs.temp != null ? `${obs.temp} °C` : '—'],
+        ['Taupunkt', obs.dewp != null ? `${obs.dewp} °C` : '—'],
+        ['Wind', fmtWind(obs)],
+        ['QNH', qnh ? `${qnh} hPa` : '—'],
+        ['WW', obs.wxString || 'keine'],
+        ['Typ', obs.metarType || 'METAR'],
+      ].map(([k, v]) => `<div class="pop-row"><span class="pop-key">${k}</span><span class="pop-val">${v}</span></div>`).join('');
+
+      return `<div>
+    <div class="pop-head">
+      <div>
+        <span class="pop-icao">${obs.icaoId}</span>
+        <span class="pop-badge" style="background:${cs.bg};color:${cs.fg};">${cs.abbr}</span>
+      </div>
+      <div class="pop-name">${obs.name || ''}</div>
+      <div class="pop-meta">Höhe: ${elev} &nbsp;·&nbsp; ${t}</div>
+    </div>
+    <div class="pop-grid">${rows}</div>
+    ${skyHTML ? `<div class="pop-sky"><div class="pop-sky-title">BEWÖLKUNG</div>${skyHTML}</div>` : ''}
+    <div class="pop-raw">${obs.rawOb || 'Rohmeldung nicht verfügbar'}</div>
+  </div>`;
+    }
+
+    function fmtWind(obs) {
+      if (obs.wspd == null && !obs.wdir) return '—';
+      const dir = obs.wdir === 'VRB' ? 'VRB' : (obs.wdir ? obs.wdir + '°' : '---');
+      const gust = obs.wgst ? ` G${obs.wgst}` : '';
+      return `${dir} ${obs.wspd ?? '—'}kt${gust}`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DATA FETCH & CACHE
+    // ═══════════════════════════════════════════════════════════════
+
+    async function fetchMETARs(bounds, hours) {
+      const w = bounds.getWest().toFixed(1);
+      const s = bounds.getSouth().toFixed(1);
+      const e = bounds.getEast().toFixed(1);
+      const n = bounds.getNorth().toFixed(1);
+      const h = hours; // pass directly – API accepts decimal values
+      const key = `${w},${s},${e},${n}|h${h}`;
+      const now = Date.now();
+
+      if (dataCache.has(key)) {
+        const { data, ts } = dataCache.get(key);
+        if (now - ts < CACHE_TTL) return data;
+      }
+
+      setStatus('loading');
+      const url = `https://aviationweather.gov/api/data/metar?format=json&hours=${h}&bbox=${s},${w},${n},${e}`;
+      console.log('Karte bbox (Leaflet):', { west: w, south: s, east: e, north: n });
+
+      const resp = await corsGet(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!Array.isArray(data)) throw new Error('Unerwartetes Format');
+
+      dataCache.set(key, { data, ts: now });
+      console.log(`API URL: ${url}`);
+      console.log(`API bbox gesendet: W=${w} S=${s} E=${e} N=${n}`);
+      if (data.length > 0) {
+        const ex = data[0];
+        console.log('Feldformat:', { icaoId: ex.icaoId, obsTime: ex.obsTime, lat: ex.lat, lon: ex.lon, temp: ex.temp });
+      }
+      console.log('Alle empfangenen Stationen:',
+        data.map(o => `${o.icaoId} (lat=${o.lat?.toFixed(1)} lon=${o.lon?.toFixed(1)})`).join(' | '));
+      return data;
+    }
+
+    function obsAtTime(allObsList, targetMs) {
+      const best = new Map();
+      let skippedFuture = 0, skippedOld = 0;
+      for (const obs of allObsList) {
+        // obsTime can be Unix seconds (number) or ISO string
+        let t;
+        if (typeof obs.obsTime === 'number') t = obs.obsTime * 1000;
+        else if (typeof obs.obsTime === 'string') t = new Date(obs.obsTime.replace(' ', 'T') + 'Z').getTime();
+        else t = targetMs; // fallback: treat as current
+
+        if (isNaN(t)) { t = targetMs; }
+
+        const windowMs = Math.max(3 * 60 * 60 * 1000, Math.abs(targetMs - Date.now()) + 2 * 60 * 60 * 1000);
+        if (t > targetMs + 90 * 60 * 1000) { skippedFuture++; continue; }
+        if (t < targetMs - windowMs) { skippedOld++; continue; }
+
+        const id = obs.icaoId;
+        if (!best.has(id) || t > best.get(id)._t) {
+          best.set(id, { ...obs, _t: t });
+        }
+      }
+      if (skippedFuture || skippedOld)
+        console.log(`obsAtTime: ${skippedFuture} zu neu, ${skippedOld} zu alt gefiltert`);
+
+      // Attach age in minutes for transparency rendering
+      const result = Array.from(best.values());
+      result.forEach(o => { o._ageMin = Math.max(0, (targetMs - o._t) / 60000); });
+      return result;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAP & RENDERING
+    // ═══════════════════════════════════════════════════════════════
+
+    const map = L.map('map', { center: [51.5, 10.0], zoom: 6, zoomControl: false });
+    L.control.zoom({ position: 'topright' }).addTo(map);
+    L.control.scale({ metric: true, imperial: false, position: 'bottomright' }).addTo(map);
+
+    const tiles = {
+      dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 }),
+      light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 }),
+      topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+        { attribution: '© OpenStreetMap, © OpenTopoMap', subdomains: 'abc', maxZoom: 17 }),
+      sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { attribution: '© Esri', maxZoom: 19 })
+    };
+    let activeTile = 'dark';
+
+    function barbColor() {
+      // Dark tiles → white barbs; light/topo/sat tiles → dark barbs with outline
+      return ['light', 'topo'].includes(activeTile) ? '#1a1a2e' : '#ffffff';
+    }
+    tiles.dark.addTo(map);
+
+    function switchTile(name) {
+      if (name === activeTile) return;
+      map.removeLayer(tiles[activeTile]);
+      tiles[name].addTo(map);
+      activeTile = name;
+      document.querySelectorAll('.tile-btn').forEach(b => b.classList.toggle('active', b.dataset.tile === name));
+      // Re-render markers so barb color updates
+      if (allObs.length) rerenderFromCache();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // METEOROLOGICAL GRID THINNING
+    // ═══════════════════════════════════════════════════════════════
+
+    // Grid cell size in degrees as function of zoom level.
+    // At zoom 10+ every station is shown; below that cells grow exponentially.
+    function gridCellDeg(zoom) {
+      if (zoom >= 10) return 0;          // no thinning
+      // ~300 km at zoom 4, halves every level
+      return 5.0 / Math.pow(2, zoom - 4);
+    }
+
+    // Returns a score for how meteorologically "interesting" a station is
+    // for the given parameter. Higher = keep this station over neighbours.
+    function meteoScore(obs, pid) {
+      switch (pid) {
+        case 'visibility': {
+          const v = parseVis(obs.visib);
+          return v != null ? 100000 / (v + 1) : 0;   // lower vis → higher score
+        }
+        case 'ceiling': {
+          const c = parseCeiling(obs.skyCondition);
+          return c != null ? 100000 / (c + 1) : 0;
+        }
+        case 'colorstate': {
+          // Worst color state = highest index in CS array (RED at end)
+          const v = parseVis(obs.visib);
+          const c = parseCeiling(obs.skyCondition);
+          const st = colorState(v, c);
+          return CS.indexOf(st);   // 0=BLUE … 5=RED
+        }
+        case 'wind_barb':
+        case 'wind_speed':
+          return obs.wspd ?? 0;
+        case 'wind_gust':
+          return obs.wgst ?? obs.wspd ?? 0;
+        case 'wind_dir':
+          return obs.wspd ?? 0;   // prefer windier stations
+        case 'pressure': {
+          const q = parseQNH(obs.altim);
+          return q ? Math.abs(q - 1013) : 0;
+        }
+        case 'pres_tend':
+          return Math.abs(obs.presTend ?? 0);
+        case 'ww':
+          return obs.wxString ? 100 : 0;
+        case 'temperature':
+          return obs.temp != null ? Math.abs(obs.temp) : 0;
+        case 'dewpoint':
+          return obs.dewp != null ? Math.abs(obs.dewp) : 0;
+        case 'clouds_lo': {
+          const l = getCloudLayer(obs.skyCondition, 0, 6500);
+          return l ? 10000 / (l.cloudBase + 1) : 0;
+        }
+        case 'clouds_mi': {
+          const l = getCloudLayer(obs.skyCondition, 6500, 20000);
+          return l ? 10000 / (l.cloudBase + 1) : 0;
+        }
+        case 'clouds_hi': {
+          const l = getCloudLayer(obs.skyCondition, 20000, 99999);
+          return l ? 10000 / (l.cloudBase + 1) : 0;
+        }
+        default: return 0;
+      }
+    }
+
+    // Combined score for 1 or 2 active parameters
+    function combinedScore(obs, params) {
+      if (params.length === 0) return 0;
+      if (params.length === 1) return meteoScore(obs, params[0]);
+      // Two params: take the maximum — the "more dangerous" dimension wins
+      return Math.max(meteoScore(obs, params[0]), meteoScore(obs, params[1]));
+    }
+
+    // Main thinning function: returns a meteorologically-aware subset
+    function thinStations(obs, zoom, params) {
+      const cell = gridCellDeg(zoom);
+      if (cell === 0) return obs;   // zoom >= 10: show everything
+
+      const grid = new Map();
+      for (const o of obs) {
+        if (o.lat == null || o.lon == null) continue;
+        const ix = Math.floor(o.lon / cell);
+        const iy = Math.floor(o.lat / cell);
+        const key = `${ix},${iy}`;
+        const score = combinedScore(o, params);
+        if (!grid.has(key) || score > grid.get(key).score) {
+          grid.set(key, { obs: o, score });
+        }
+      }
+      const result = Array.from(grid.values()).map(v => v.obs);
+      console.log(`thinStations zoom=${zoom} cell=${cell.toFixed(2)}° → ${obs.length} → ${result.length}`);
+      return result;
+    }
+
+    function renderObs(obs) {
+      if (markerLayer) { map.removeLayer(markerLayer); markerLayer = null; }
+      markerLayer = L.layerGroup();
+      const zoom = map.getZoom();
+      const thinned = thinStations(obs, zoom, selectedParams);
+      const subset = thinned.slice(0, MAX_MARKERS);
+      let ok = 0, fail = 0;
+      for (const o of subset) {
+        if (o.lat == null || o.lon == null) continue;
+        try { markerLayer.addLayer(createMarker(o, selectedParams)); ok++; }
+        catch (e) { fail++; if (fail <= 3) console.warn(`Marker [${o.icaoId}]:`, e.message); }
+      }
+      markerLayer.addTo(map);
+      const info = `${ok} Stat.${fail > 0 ? ' (' + fail + ' Err)' : ''}`;
+      document.getElementById('station-count').textContent = info;
+      console.log(`renderObs: gesamt=${obs.length} subset=${subset.length} ok=${ok} fail=${fail}`);
+      if (subset.length > 0)
+        console.log('Beispiel-Rohformat (1. Datensatz):', JSON.stringify(subset[0]));
+    }
+
+    const debouncedUpdate = debounce(updateDisplay, 700);
+
+    async function updateDisplay() {
+      if (isLoading) return;
+      isLoading = true;
+      const srcList = [...activeSources].map(s => s.toUpperCase()).join(' + ');
+      showLoading(`Lade ${srcList} …`);
+      try {
+        const zoom = map.getZoom();
+        if (zoom < 4) {
+          renderObs([]);
+          setStatus('ok'); setStatusTxt('Zoom ≥ 4 für Stationsdaten');
+          return;
+        }
+        const hoursNeeded = Math.min(Math.max(1.5, Math.abs(timeOffset) + 1.5), 48);
+        const targetMs = Date.now() + timeOffset * 3600000;
+        let combined = [];
+
+        if (activeSources.has('metar')) {
+          allObs = await fetchMETARs(map.getBounds(), hoursNeeded);
+          console.log(`METAR API → ${allObs.length} Meldungen`);
+          combined.push(...obsAtTime(allObs, targetMs));
+        }
+
+        if (activeSources.has('synop')) {
+          const synopNew = await loadSynopObs(map.getBounds(), hoursNeeded);
+          synopObs = synopNew;
+          console.log(`SYNOP → ${synopObs.length} Meldungen`);
+          combined.push(...obsAtTime(synopObs, targetMs));
+        }
+
+        // Deduplicate: prefer METAR over SYNOP for same station
+        const seen = new Map();
+        for (const o of combined) {
+          const key = o.wmoId ? `wmo${o.wmoId}` : `icao${o.icaoId}`;
+          if (!seen.has(key) || o.metarType !== 'SYNOP') seen.set(key, o);
+        }
+        const current = [...seen.values()];
+        console.log(`Gesamt → ${current.length} Stationen (METAR+SYNOP)`);
+        renderObs(current);
+        const ts = new Date().toLocaleTimeString('de-DE');
+        setStatus('ok'); setStatusTxt(`${current.length} Stat. (${[...activeSources].join('+').toUpperCase()}) · ${ts}`);
+      } catch (err) {
+        setStatus('error'); setStatusTxt('Ladefehler – ↺ erneut versuchen');
+        console.error(err);
+      } finally {
+        isLoading = false;
+        hideLoading();
+      }
+    }
+
+    map.on('moveend', debouncedUpdate);
+    map.on('zoomend', debouncedUpdate);
+
+    function debounce(fn, delay) {
+      let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), delay); };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // STATUS
+    // ═══════════════════════════════════════════════════════════════
+
+    function setStatus(s) {
+      document.getElementById('status-dot').className = s;
+    }
+    function setStatusTxt(txt) {
+      document.getElementById('status-text').textContent = txt;
+    }
+
+    let _loadingTimer = null;
+    function showLoading(msg = 'Lade Wetterdaten …', sub = '') {
+      const ov = document.getElementById('loading-overlay');
+      const msg_ = document.getElementById('loading-msg');
+      const sub_ = document.getElementById('loading-sub');
+      msg_.textContent = msg;
+      sub_.textContent = sub;
+      // Small delay so fast loads don't flicker
+      clearTimeout(_loadingTimer);
+      _loadingTimer = setTimeout(() => ov.classList.add('visible'), 180);
+    }
+    function hideLoading() {
+      clearTimeout(_loadingTimer);
+      document.getElementById('loading-overlay').classList.remove('visible');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PARAM UI
+    // ═══════════════════════════════════════════════════════════════
+
+    function buildParamUI() {
+      const scroll = document.getElementById('param-scroll');
+      scroll.innerHTML = '';
+      PARAM_GROUPS.forEach(grp => {
+        const params = PARAMS.filter(p => p.group === grp);
+        const div = document.createElement('div');
+        div.className = 'param-group';
+        div.innerHTML = `<div class="param-group-title">${grp}</div>`;
+        params.forEach(p => {
+          const item = document.createElement('div');
+          item.className = 'param-item';
+          item.dataset.id = p.id;
+          item.innerHTML = `
+        <div class="sel-dot"></div>
+        <span class="param-name">${p.label}</span>
+        <span class="param-slot" id="slot-${p.id}">—</span>`;
+          item.addEventListener('click', () => toggleParam(p.id));
+          div.appendChild(item);
+        });
+        scroll.appendChild(div);
+      });
+      refreshParamUI();
+    }
+
+    function toggleParam(id) {
+      if (selectedParams.includes(id)) {
+        if (selectedParams.length > 1) selectedParams = selectedParams.filter(p => p !== id);
+      } else {
+        selectedParams = selectedParams.length >= 2
+          ? [selectedParams[1], id]
+          : [...selectedParams, id];
+      }
+      refreshParamUI();
+      updateLegend();
+      rerenderFromCache();
+    }
+
+    function refreshParamUI() {
+      document.querySelectorAll('.param-item').forEach(el => {
+        const id = el.dataset.id;
+        const idx = selectedParams.indexOf(id);
+        el.classList.remove('sel-1', 'sel-2');
+        if (idx === 0) el.classList.add('sel-1');
+        else if (idx === 1) el.classList.add('sel-2');
+        const slot = el.querySelector('.param-slot');
+        if (idx === 0) slot.textContent = '①';
+        else if (idx === 1) slot.textContent = '②';
+        else slot.textContent = '';
+      });
+    }
+
+    function rerenderFromCache() {
+      if (!allObs.length) return;
+      const targetMs = Date.now() + timeOffset * 3600000;
+      renderObs(obsAtTime(allObs, targetMs));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // LEGEND
+    // ═══════════════════════════════════════════════════════════════
+
+    function updateLegend() {
+      const c = document.getElementById('legend-container');
+      c.innerHTML = '';
+      selectedParams.forEach((pid, i) => {
+        const p = PARAMS.find(x => x.id === pid);
+        if (!p) return;
+        const clr = i === 0 ? 'var(--cyan)' : 'var(--amber)';
+        const wrap = document.createElement('div');
+        wrap.className = 'legend-block';
+
+        const lbl = document.createElement('div');
+        lbl.className = 'legend-label';
+        lbl.style.color = clr;
+        lbl.textContent = `${i === 0 ? '①' : '②'} ${p.label}`;
+        wrap.appendChild(lbl);
+
+        const body = legendBody(pid);
+        if (body) wrap.appendChild(body);
+        c.appendChild(wrap);
+      });
+    }
+
+    function legendBody(pid) {
+      const csLegend = () => {
+        const d = document.createElement('div');
+        d.className = 'legend-badges';
+        CS.forEach(s => {
+          const b = document.createElement('span');
+          b.className = 'cs-badge';
+          b.style.background = s.bg; b.style.color = s.fg;
+          b.textContent = s.abbr;
+          d.appendChild(b);
+        });
+        return d;
+      };
+      const gradLegend = (stops, lo, hi) => {
+        const d = document.createElement('div');
+        const grad = stops.map(s => `rgb(${s.r},${s.g},${s.b})`).join(',');
+        d.innerHTML = `<div class="legend-gradient" style="background:linear-gradient(to right,${grad})"></div>
+      <div class="legend-range"><span>${lo}</span><span>${hi}</span></div>`;
+        return d;
+      };
+
+      switch (pid) {
+        case 'colorstate': case 'visibility': case 'ceiling': return csLegend();
+        case 'temperature': case 'dewpoint': return gradLegend(TEMP_S, '-30°C', '40°C');
+        case 'wind_speed': case 'wind_gust': return gradLegend(WIND_S, '0kt', '65kt');
+        case 'wind_barb': return null; // Barb count encodes speed — no color scale needed
+        case 'pressure': return gradLegend(PRES_S, '975hPa', '1040hPa');
+        case 'pres_tend': return gradLegend(TEND_S, '-6hPa', '+6hPa');
+        case 'clouds_lo': case 'clouds_mi': case 'clouds_hi': {
+          const d = document.createElement('div');
+          d.className = 'legend-badges';
+          [['FEW', '#0d3060', '#6ab8ff'], ['SCT', '#0d5535', '#70ffb0'],
+          ['BKN', '#4a3800', '#ffcc44'], ['OVC', '#333', '#ccc']].forEach(([n, bg, fg]) => {
+            const b = document.createElement('span');
+            b.className = 'cs-badge'; b.style.background = bg; b.style.color = fg;
+            b.textContent = n; d.appendChild(b);
+          });
+          return d;
+        }
+        case 'wind_dir': {
+          const d = document.createElement('div');
+          d.className = 'legend-badges';
+          d.innerHTML = `<span class="cs-badge" style="background:#0d2840;color:#4ab8f0;">N/O/S/W in °</span>`;
+          return d;
+        }
+        case 'ww': {
+          const d = document.createElement('div');
+          d.className = 'legend-badges';
+          [['TS', '#4a0080', '#e0a0ff'], ['SN', '#a0c4e0', '#001040'], ['RA', '#0a3a7a', '#80c8ff'],
+          ['FG', '#30301a', '#cccc80'], ['HZ', '#4a4020', '#ddcc80']].forEach(([n, bg, fg]) => {
+            const b = document.createElement('span');
+            b.className = 'cs-badge'; b.style.background = bg; b.style.color = fg;
+            b.textContent = n; d.appendChild(b);
+          });
+          return d;
+        }
+      }
+      return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TIME CONTROL
+    // ═══════════════════════════════════════════════════════════════
+
+    function setupTime() {
+      const slider = document.getElementById('time-slider');
+      const disp = document.getElementById('time-display');
+
+      function updateDisp() {
+        const steps = parseInt(slider.value);
+        timeOffset = steps * 0.25; // 15min per step
+        if (timeOffset >= -0.05) {
+          const now = new Date();
+          const hh = String(now.getUTCHours()).padStart(2, '0');
+          const mm = String(now.getUTCMinutes()).padStart(2, '0');
+          disp.textContent = `▶ AKTUELL · ${hh}:${mm} UTC`;
+          disp.style.color = 'var(--green)';
+        } else {
+          const absH = Math.abs(timeOffset);
+          const hh = Math.floor(absH);
+          const mm = Math.round((absH - hh) * 60);
+          const target = new Date(Date.now() + timeOffset * 3600000);
+          const ts = `${String(target.getUTCHours()).padStart(2, '0')}:${String(target.getUTCMinutes()).padStart(2, '0')} UTC`;
+          disp.textContent = `◀ −${hh}h${mm > 0 ? String(mm).padStart(2, '0') + 'm' : ''} (${ts})`;
+          disp.style.color = 'var(--amber)';
+        }
+      }
+
+      slider.addEventListener('input', () => {
+        updateDisp();
+        rerenderFromCache();
+        onTimeChange();
+      });
+      slider.addEventListener('change', () => { debouncedUpdate(); onTimeChange(); });
+      updateDisp();
+
+      document.getElementById('btn-now').addEventListener('click', () => {
+        slider.value = 0; updateDisp();
+        dataCache.clear(); updateDisplay();
+      });
+
+      // Keep the clock ticking when showing current data
+      setInterval(() => { if (timeOffset >= -0.05) updateDisp(); }, 30000);
+
+      document.getElementById('refresh-btn').addEventListener('click', () => {
+        dataCache.clear(); updateDisplay();
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // INIT
+    // ═══════════════════════════════════════════════════════════════
+
+    document.querySelectorAll('.tile-btn').forEach(btn =>
+      btn.addEventListener('click', () => switchTile(btn.dataset.tile))
+    );
+
+    // ═══════════════════════════════════════════════════════════════
+    // RAINVIEWER OVERLAY
+    // ═══════════════════════════════════════════════════════════════
+
+    const RV_API = 'https://api.rainviewer.com/public/weather-maps.json';
+    let rvMeta = null;       // cached API response
+    let rvMetaTs = 0;
+    const RV_META_TTL = 5 * 60 * 1000;  // refresh metadata every 5 min
+
+    let radarLayer = null;
+    let labelsLayer = null;  // political overlay for satellite mode
+    const LABELS_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+
+    function showLabelsOverlay() {
+      if (labelsLayer) return;
+      labelsLayer = L.tileLayer(LABELS_URL, {
+        attribution: '© Esri, © OpenStreetMap',
+        maxZoom: 19,
+        zIndex: 10,   // above everything
+        pane: 'overlayPane',
+      });
+      labelsLayer.addTo(map);
+    }
+    function hideLabelsOverlay() {
+      if (labelsLayer) { map.removeLayer(labelsLayer); labelsLayer = null; }
+    }
+    let satLayer = null;
+    let radarOn = false;
+    let satOn = false;
+    let ovOpacity = 0.70;
+    const ovColor = 4;   // RainViewer free: color fixed (API key needed for choice)
+
+    // Fetch + cache RainViewer metadata JSON
+    async function getRVMeta() {
+      if (rvMeta && Date.now() - rvMetaTs < RV_META_TTL) return rvMeta;
+      const resp = await corsGet(RV_API);
+      rvMeta = await resp.json();
+      rvMetaTs = Date.now();
+      return rvMeta;
+    }
+
+    // Find frame closest in time to targetMs
+    function rvClosest(frames, targetSec) {
+      if (!frames || frames.length === 0) return null;
+      return frames.reduce((best, f) =>
+        Math.abs(f.time - targetSec) < Math.abs(best.time - targetSec) ? f : best
+      );
+    }
+
+    function rvFmtTime(unixSec) {
+      const d = new Date(unixSec * 1000);
+      const hh = String(d.getUTCHours()).padStart(2, '0');
+      const mm = String(d.getUTCMinutes()).padStart(2, '0');
+      const dd = String(d.getUTCDate()).padStart(2, '0');
+      const mo = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'][d.getUTCMonth()];
+      return `${dd}. ${mo}  ${hh}:${mm} UTC`;
+    }
+
+    async function updateOverlays() {
+      if (!radarOn && !satOn) return;
+      let meta = null;
+      if (radarOn) {
+        try { meta = await getRVMeta(); }
+        catch (e) { console.warn('RainViewer metadata fetch failed:', e.message); }
+      }
+
+      const targetSec = Math.round((Date.now() + timeOffset * 3600000) / 1000);
+      const timeInfo = document.getElementById('ov-time-info');
+
+      // ── RADAR ──────────────────────────────────────────────────
+      if (radarOn && meta) {
+        const allFrames = [...(meta.radar.past || []), ...(meta.radar.nowcast || [])];
+        const frame = rvClosest(allFrames, targetSec);
+        const tileUrl = `${meta.host}${frame.path}/256/{z}/{x}/{y}/${ovColor}/1_1.png`;
+
+        // Always recreate radar layer so maxNativeZoom is always applied
+        if (radarLayer) map.removeLayer(radarLayer);
+        radarLayer = L.tileLayer(tileUrl, {
+          opacity: ovOpacity,
+          attribution: 'Radar: <a href="https://rainviewer.com" target="_blank">RainViewer</a>',
+          zIndex: 5,
+          tileSize: 256,
+          maxNativeZoom: 7,   // RainViewer native max; Leaflet scales tiles above z7
+          maxZoom: 19,
+          transparent: true,
+        });
+        radarLayer.addTo(map);
+
+        // Nowcast indicator
+        const isNow = (meta.radar.nowcast || []).some(f => f.time === frame.time);
+        timeInfo.innerHTML = `◉ Radar ${rvFmtTime(frame.time)}${isNow ? ' <span style="color:var(--amber)">▶ Nowcast</span>' : ''}`;
+      }
+
+      // ── SATELLITE (DWD WMS) ────────────────────────────────────
+      if (satOn) {
+        updateDWDSat();
+        if (!radarOn) {
+          const prod = document.getElementById('ov-satproduct');
+          timeInfo.textContent = `◎ Satellit · ${prod.options[prod.selectedIndex].text} · DWD/EUMETSAT`;
+        }
+      }
+
+      document.getElementById('overlay-controls').style.display = 'block';
+    }
+
+    // ── DWD WMS Satellite ─────────────────────────────────────────
+    // /wms endpoint in server.py transparently proxies to maps.dwd.de/geoserver/dwd/wms
+    // On a real web host, point directly at DWD (they allow CORS).
+    function dwdWmsBase() {
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+        return '/wms';
+      return 'https://maps.dwd.de/geoserver/dwd/wms';
+    }
+
+    function updateDWDSat() {
+      const product = document.getElementById('ov-satproduct').value;
+      console.log('DWD SAT layer:', product);
+      if (satLayer && satLayer._dwdProduct === product) {
+        satLayer.setOpacity(ovOpacity);
+        return;
+      }
+      if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+      satLayer = L.tileLayer.wms(dwdWmsBase(), {
+        layers: product,
+        format: 'image/png',
+        transparent: true,
+        opacity: ovOpacity,
+        version: '1.3.0',
+        uppercase: false,
+        attribution: 'Satellit: <a href="https://www.dwd.de" target="_blank">DWD</a> / EUMETSAT',
+        zIndex: 4,
+      });
+      satLayer._dwdProduct = product;
+      satLayer.addTo(map);
+      console.log(`DWD WMS layer added: ${product} via ${dwdWmsBase()}`);
+    }
+
+    function removeRadar() {
+      if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
+    }
+    function removeSat() {
+      if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+    }
+    function refreshOverlayControls() {
+      const any = radarOn || satOn;
+      document.getElementById('overlay-controls').style.display = any ? 'block' : 'none';
+
+      document.getElementById('ov-satproduct-row').style.display = satOn ? 'flex' : 'none';
+      document.getElementById('ov-radar').classList.toggle('active', radarOn);
+      document.getElementById('ov-sat').classList.toggle('active', satOn);
+      if (!any) document.getElementById('ov-time-info').textContent = '';
+    }
+
+    function setupOverlays() {
+      // Toggle buttons
+      document.getElementById('ov-radar').addEventListener('click', async () => {
+        radarOn = !radarOn;
+        if (!radarOn) removeRadar();
+        refreshOverlayControls();
+        await updateOverlays();
+      });
+      document.getElementById('ov-sat').addEventListener('click', async () => {
+        satOn = !satOn;
+        if (!satOn) { removeSat(); hideLabelsOverlay(); }
+        else showLabelsOverlay();
+        refreshOverlayControls();
+        await updateOverlays();
+      });
+
+      // Opacity
+      const opSlider = document.getElementById('ov-opacity');
+      const opVal = document.getElementById('ov-opacity-val');
+      opSlider.addEventListener('input', () => {
+        ovOpacity = parseInt(opSlider.value) / 100;
+        opVal.textContent = `${opSlider.value}%`;
+        if (radarLayer) radarLayer.setOpacity(ovOpacity);
+        if (satLayer) satLayer.setOpacity(ovOpacity);
+      });
+
+      // Satellite product (DWD WMS)
+      document.getElementById('ov-satproduct').addEventListener('change', () => {
+        if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+        if (satOn) {
+          updateDWDSat();
+          const prod = document.getElementById('ov-satproduct');
+          document.getElementById('ov-time-info').textContent =
+            `◎ Satellit · ${prod.options[prod.selectedIndex].text} · DWD/EUMETSAT`;
+        }
+      });
+    }
+
+    // Hook into existing time slider so overlays follow time navigation
+    const _origSliderHandler = debouncedUpdate;  // wrap after debouncedUpdate exists
+    function onTimeChange() {
+      if (radarOn || satOn) updateOverlays();
+    }
+
+    buildParamUI();
+    updateLegend();
+    setupTime();
+    setupOverlays();
+    setupSourceToggles();
+
+    // Auto-refresh every 5 min when showing current data
+    setInterval(() => {
+      if (timeOffset >= -0.05) { dataCache.clear(); updateDisplay(); }
+    }, AUTO_REFRESH);
+
+    // Initial load
+    updateDisplay();
+  </script>
+</body>
+
+</html>

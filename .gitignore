@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code internal
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# Editor
+.vscode/
+*.swp
+*.swo
