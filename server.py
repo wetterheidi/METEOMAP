@@ -218,13 +218,49 @@ class Handler(SimpleHTTPRequestHandler):
                         wx_str = None
                     if wx_str and 'TS' in wx_str:
                         print(f'  [BUFR TS] WMO{wmo_id} ww={ww_int} → "{wx_str}"')
-                sky=[]; cmap={0:'SKC',1:'FEW',2:'FEW',3:'FEW',4:'SCT',
-                               5:'SCT',6:'BKN',7:'BKN',8:'OVC'}
-                for a,h in zip(_safe_arr(handle,'cloudAmount'),
-                                _safe_arr(handle,'heightOfBaseOfCloud')):
+                cmap={0:'SKC',1:'FEW',2:'FEW',3:'FEW',4:'SCT',
+                      5:'SCT',6:'BKN',7:'BKN',8:'OVC'}
+                COVER_RANK = {'SKC':0,'FEW':1,'SCT':2,'BKN':3,'OVC':4}
+                c_amt  = _safe_arr(handle,'cloudAmount')
+                c_base = _safe_arr(handle,'heightOfBaseOfCloud')
+                c_vsig = _safe_arr(handle,'verticalSignificanceSurfaceObservations')
+                n = min(len(c_amt), len(c_base))
+                # Collect raw layers: skip vertSig=7 (N, total cover) and missing bases
+                raw = []
+                for i in range(n):
+                    a, h = c_amt[i], c_base[i]
                     if a is None or h is None: continue
-                    sky.append({'skyCover':cmap.get(int(a),'FEW'),
-                                'cloudBase':int(h*3.28084)})
+                    vs = c_vsig[i] if i < len(c_vsig) else None
+                    if vs == 7: continue          # total cloud cover N – no layer
+                    base_ft = int(h * 3.28084)
+                    if base_ft < 0: continue
+                    raw.append((base_ft, cmap.get(int(a),'FEW'), vs))
+                # Prefer vertSig=20 layers (explicitly observed single layers)
+                sig20 = [(b,c) for b,c,vs in raw if vs == 20]
+                pool  = sig20 if sig20 else [(b,c) for b,c,vs in raw]
+                # Deduplicate: for bases within 500 ft keep highest cover
+                pool.sort(key=lambda x: x[0])
+                merged, used = [], []
+                for base_ft, cover in pool:
+                    near = next((j for j,b in enumerate(used) if abs(base_ft-b)<500), None)
+                    if near is None:
+                        merged.append({'skyCover':cover,'cloudBase':base_ft})
+                        used.append(base_ft)
+                    elif COVER_RANK.get(cover,0) > COVER_RANK.get(merged[near]['skyCover'],0):
+                        merged[near] = {'skyCover':cover,'cloudBase':base_ft}
+                # Build final sky: up to 3 layers; always include lowest ceiling (BKN/OVC)
+                ceil_layers  = [l for l in merged if l['skyCover'] in ('BKN','OVC')]
+                other_layers = [l for l in merged if l['skyCover'] not in ('BKN','OVC')]
+                sky = []
+                if ceil_layers:
+                    sky.append(ceil_layers[0])   # lowest ceiling always included
+                    below = [l for l in other_layers if l['cloudBase'] < ceil_layers[0]['cloudBase']]
+                    sky = sorted(below, key=lambda x:x['cloudBase'])[-1:] + sky  # 1 layer below
+                    if len(sky) < 3 and len(ceil_layers) > 1:
+                        sky.append(ceil_layers[1])   # second ceiling layer if room
+                else:
+                    sky = other_layers[:3]
+                sky.sort(key=lambda x: x['cloudBase'])
                 name = _safe(handle,'stationOrSiteName') or ''
                 return {'icaoId': f'WMO{str(wmo_id).zfill(5)}' if wmo_id else None,
                     'wmoId':wmo_id,'name':name.strip(),
