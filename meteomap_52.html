@@ -3443,7 +3443,10 @@
 
       function colorizeWeatherText(text) {
         if (!text) return '';
-        return text.split(/(\s+)/).map(tok => {
+        // Normalize compound SM fractions before tokenizing: "1 1/2SM" → "1.5SM"
+        const normalized = text.replace(/\b(\d+)\s+(\d+)\/(\d+)SM\b/g,
+          (_, w, n, d) => (parseInt(w) + parseInt(n) / parseInt(d)) + 'SM');
+        return normalized.split(/(\s+)/).map(tok => {
           // Ceiling: BKN/OVC/VV + 3 digits (+ optional CB/TCU)
           const cm = tok.match(/^(BKN|OVC|VV)(\d{3})(CB|TCU)?$/);
           if (cm) {
@@ -3459,8 +3462,8 @@
               return `<span style="background:${cs.bg};color:${cs.fg};border-radius:3px;padding:0 3px;">${tok}</span>`;
             }
           }
-          // SM vis: "2SM", "1/4SM", "3/4SM"
-          const sm = tok.match(/^([\d\/]+)SM$/);
+          // SM vis: "2SM", "1/4SM", "3/4SM", "1.5SM" (after compound normalization)
+          const sm = tok.match(/^([\d\.\/]+)SM$/);
           if (sm) {
             const metres = Math.round(parseSMFrac(sm[1]) * 1609.344);
             const cs = colorState(metres, Infinity);
@@ -3552,19 +3555,45 @@
         </div>`;
       }
 
+      async function fetchSynopStation(wmoId) {
+        const stations = await loadWmoStations();
+        const block = Math.floor(wmoId / 1000);
+        const now = new Date();
+        const from = new Date(now - 3 * 3600000);
+        const fmt = d => d.toISOString().replace(/[-T:]/g, '').slice(0, 12);
+        const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2,'0')}&begin=${fmt(from)}&end=${fmt(now)}`;
+        const r = await corsGet(url);
+        const text = await r.text();
+        // Scan for the matching station line (newest = last match wins)
+        let obs = null;
+        for (const line of text.split('\n')) {
+          const l = line.trim().replace(/=+$/, '');
+          if (!l || l.startsWith('#')) continue;
+          if (parseInt(l.split(',')[0]) !== wmoId) continue;
+          try { const o = parseSynopLine(l, stations); if (o) obs = o; } catch {}
+        }
+        return obs;
+      }
+
       async function renderWx(id, idx) {
         const body = document.getElementById(`mon-body-wx-${idx}`);
         const badge = document.getElementById(`mon-badge-wx-${idx}`);
         if (!body) return;
         body.innerHTML = `<span style="color:var(--text-dim);font-size:10px;font-style:italic;">Lade…</span>`;
         try {
-          const raw = await fetchMetar(id.trim().toUpperCase());
-          if (!raw) { body.innerHTML = `<span style="color:#f44;font-size:10px;">Keine Daten für ${id}</span>`; return; }
-          const obs = normalizeObs(raw);
-          if (badge) { badge.textContent = obs.metarType; }
+          const isWmo = /^\d{4,5}$/.test(id.trim());
+          let obs;
+          if (isWmo) {
+            obs = await fetchSynopStation(parseInt(id.trim()));
+          } else {
+            const raw = await fetchMetar(id.trim().toUpperCase());
+            obs = raw ? normalizeObs(raw) : null;
+          }
+          if (!obs) { body.innerHTML = `<span style="color:#f44;font-size:10px;">Keine Daten für ${id}</span>`; return; }
+          if (badge) badge.textContent = obs.metarType || (isWmo ? 'SYNOP' : 'METAR');
           const useRaw = document.getElementById('mon-raw')?.checked;
           body.innerHTML = useRaw
-            ? `<div class="mon-raw-text">${colorizeWeatherText(obs.rawOb)}</div>`
+            ? `<div class="mon-raw-text">${colorizeWeatherText(obs.rawOb || '')}</div>`
             : monFormatParsed(obs);
         } catch (e) {
           body.innerHTML = `<span style="color:#f44;font-size:10px;">Fehler: ${e.message}</span>`;
@@ -3672,6 +3701,13 @@
 
         buildWxList();
         buildTafList();
+
+        // Auto-refresh every 5 min, only when Monitor tab is visible
+        setInterval(() => {
+          if (!document.getElementById('tab-monitor')?.classList.contains('active')) return;
+          load(LS_WX).forEach((id, i) => renderWx(id, i));
+          load(LS_TAF).forEach((id, i) => renderTaf(id, i));
+        }, 5 * 60 * 1000);
       }
 
       return { init };
