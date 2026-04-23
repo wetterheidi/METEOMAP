@@ -1245,6 +1245,7 @@
 
     // NATO Color State thresholds (worst of visibility OR ceiling applies)
     const CS = [
+      { name: 'BLUE PLUS', abbr: 'BLU+', bg: '#00B0FF', fg: '#003366', cFt: 20000, vMtr: 8000 },
       { name: 'BLUE', abbr: 'BLU', bg: '#1565C0', fg: '#ffffff', cFt: 2500, vMtr: 8000 },
       { name: 'WHITE', abbr: 'WHT', bg: '#e0e0e0', fg: '#111111', cFt: 1500, vMtr: 5000 },
       { name: 'GREEN', abbr: 'GRN', bg: '#2E7D32', fg: '#ffffff', cFt: 700, vMtr: 3700 },
@@ -2801,7 +2802,7 @@
           const v = parseVis(obs.visib);
           const c = parseCeiling(obs.skyCondition);
           const st = colorState(v, c);
-          return CS.indexOf(st);   // 0=BLUE … 5=RED
+          return CS.indexOf(st);   // 0=BLU+ … 6=RED
         }
         case 'wind_barb':
         case 'wind_speed':
