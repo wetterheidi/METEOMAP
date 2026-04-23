@@ -224,6 +224,7 @@ class Handler(SimpleHTTPRequestHandler):
                 c_amt  = _safe_arr(handle,'cloudAmount')
                 c_base = _safe_arr(handle,'heightOfBaseOfCloud')
                 c_vsig = _safe_arr(handle,'verticalSignificanceSurfaceObservations')
+                n = min(len(c_amt), len(c_base))
                 # Collect raw layers: skip vertSig=7 (N, total cover) and missing bases
                 raw = []
                 for i in range(n):
@@ -348,6 +349,7 @@ class Handler(SimpleHTTPRequestHandler):
                                 try:
                                   if n_sub > 1:
                                     sub = eccodes.codes_clone(handle)
+                                    eccodes.codes_set(sub,'unpack', 1)
                                     eccodes.codes_set(sub,'extractSubset', si)
                                     eccodes.codes_set(sub,'doExtractSubsets', 1)
                                   else:
