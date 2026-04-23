@@ -155,6 +155,12 @@ class Handler(SimpleHTTPRequestHandler):
 
             def decode_msg(handle):
                 eccodes.codes_set(handle, 'unpack', 1)
+                # Multi-subset BUFR: codes_get returns first-subset value,
+                # codes_get_array returns ALL subsets concatenated.
+                # Determine how many subsets share each array slot.
+                try:
+                    n_subsets = int(eccodes.codes_get(handle, 'numberOfSubsets') or 1)
+                except: n_subsets = 1
                 lat = _safe(handle,'latitude'); lon = _safe(handle,'longitude')
                 if lat is None or lon is None: return None
                 blk = _safe(handle,'blockNumber'); num = _safe(handle,'stationNumber')
@@ -224,7 +230,14 @@ class Handler(SimpleHTTPRequestHandler):
                 c_amt  = _safe_arr(handle,'cloudAmount')
                 c_base = _safe_arr(handle,'heightOfBaseOfCloud')
                 c_vsig = _safe_arr(handle,'verticalSignificanceSurfaceObservations')
-                n = min(len(c_amt), len(c_base))
+                # Slice to first-subset data only (multi-subset BUFR fix)
+                total = min(len(c_amt), len(c_base))
+                n = (total // n_subsets) if n_subsets > 1 and total % n_subsets == 0 \
+                    else total
+                if n_subsets > 1:
+                    c_amt  = c_amt[:n]
+                    c_base = c_base[:n]
+                    c_vsig = c_vsig[:n] if c_vsig else c_vsig
                 # Collect raw layers: skip vertSig=7 (N, total cover) and missing bases
                 raw = []
                 for i in range(n):
