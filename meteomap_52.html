@@ -1956,9 +1956,23 @@
         case 'visibility': return parseVis(obs.visib);
         case 'ceiling': return parseCeiling(normSky(obs));
         case 'colorstate': return colorState(parseVis(obs.visib), parseCeiling(normSky(obs)));
-        case 'clouds_lo': return getCloudLayer(normSky(obs), 0, 6500);
-        case 'clouds_mi': return getCloudLayer(normSky(obs), 6500, 20000);
-        case 'clouds_hi': return getCloudLayer(normSky(obs), 20000, 99999);
+        case 'clouds_lo': {
+          const sky = normSky(obs); const l = getCloudLayer(sky, 0, 6500);
+          if (!l) return null;
+          return { ...l, isEffectiveCeiling: ['BKN','OVC','VV'].includes(l.skyCover) };
+        }
+        case 'clouds_mi': {
+          const sky = normSky(obs); const l = getCloudLayer(sky, 6500, 20000);
+          if (!l) return null;
+          const loCeil = sky.some(x => x.cloudBase < 6500 && ['BKN','OVC','VV'].includes(x.skyCover));
+          return { ...l, isEffectiveCeiling: ['BKN','OVC','VV'].includes(l.skyCover) && !loCeil };
+        }
+        case 'clouds_hi': {
+          const sky = normSky(obs); const l = getCloudLayer(sky, 20000, 99999);
+          if (!l) return null;
+          const loCeil = sky.some(x => x.cloudBase < 20000 && ['BKN','OVC','VV'].includes(x.skyCover));
+          return { ...l, isEffectiveCeiling: ['BKN','OVC','VV'].includes(l.skyCover) && !loCeil };
+        }
         case 'wind_barb': return { spd: obs.wspd ?? 0, dir: obs.wdir };
         case 'wind_dir': return (obs.wdir && obs.wdir !== 'VRB') ? parseInt(obs.wdir) : null;
         case 'wind_speed': return obs.wspd ?? null;
@@ -1989,11 +2003,8 @@
         }
         case 'clouds_lo': case 'clouds_mi': case 'clouds_hi': {
           if (!val) return { bg: '#0d1a28', fg: '#2a4a6a' };
-          const MAP = {
-            FEW: { bg: '#0d3060', fg: '#6ab8ff' }, SCT: { bg: '#0d5535', fg: '#70ffb0' },
-            BKN: { bg: '#4a3800', fg: '#ffcc44' }, OVC: { bg: '#333', fg: '#ccc' }, VV: { bg: '#2a1a1a', fg: '#ff8888' }
-          };
-          return MAP[val.skyCover] || none;
+          if (!val.isEffectiveCeiling) return { bg: '#78909C', fg: '#ffffff' };
+          return colorState(Infinity, val.cloudBase);
         }
         case 'wind_barb': case 'wind_speed': case 'wind_gust': {
           const spd = typeof val === 'object' ? val.spd : val;
@@ -3091,11 +3102,21 @@
         case 'clouds_lo': case 'clouds_mi': case 'clouds_hi': {
           const d = document.createElement('div');
           d.className = 'legend-badges';
-          [['FEW', '#0d3060', '#6ab8ff'], ['SCT', '#0d5535', '#70ffb0'],
-          ['BKN', '#4a3800', '#ffcc44'], ['OVC', '#333', '#ccc']].forEach(([n, bg, fg]) => {
+          // FEW/SCT → neutral
+          ['FEW','SCT'].forEach(n => {
             const b = document.createElement('span');
-            b.className = 'cs-badge'; b.style.background = bg; b.style.color = fg;
+            b.className = 'cs-badge'; b.style.background = '#78909C'; b.style.color = '#ffffff';
             b.textContent = n; d.appendChild(b);
+          });
+          // separator
+          const sep = document.createElement('span');
+          sep.style.cssText = 'color:#aaa;font-size:10px;align-self:center;margin:0 2px;';
+          sep.textContent = '|  BKN/OVC ='; d.appendChild(sep);
+          // BKN/OVC → full CS scale
+          CS.forEach(s => {
+            const b = document.createElement('span');
+            b.className = 'cs-badge'; b.style.background = s.bg; b.style.color = s.fg;
+            b.textContent = s.abbr; d.appendChild(b);
           });
           return d;
         }
@@ -3523,15 +3544,20 @@
           : visStr;
 
         // Sky tokens
+        const CLOUD_NEUTRAL = { bg: '#78909C', fg: '#ffffff' };
         const skyStr = sky.length
-          ? sky.map(s => {
+          ? sky.map((s, idx) => {
             const h = s.cloudBase != null ? String(Math.round(s.cloudBase / 100)).padStart(3, '0') : '///';
             const token = `${s.skyCover}${h}`;
-            if (['BKN', 'OVC', 'VV'].includes(s.skyCover) && s.cloudBase != null) {
-              const cs2 = colorState(Infinity, s.cloudBase);
-              return `<span style="background:${cs2.bg};color:${cs2.fg};border-radius:3px;padding:0 3px;">${token}</span>`;
+            const isCeiling = ['BKN', 'OVC', 'VV'].includes(s.skyCover);
+            let col;
+            if (!isCeiling) {
+              col = CLOUD_NEUTRAL;
+            } else {
+              const lowerCeiling = sky.slice(0, idx).some(l => ['BKN', 'OVC', 'VV'].includes(l.skyCover) && l.cloudBase != null);
+              col = (lowerCeiling || s.cloudBase == null) ? CLOUD_NEUTRAL : colorState(Infinity, s.cloudBase);
             }
-            return token;
+            return `<span style="background:${col.bg};color:${col.fg};border-radius:3px;padding:0 3px;">${token}</span>`;
           }).join(' ')
           : 'SKC';
 
