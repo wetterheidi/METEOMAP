@@ -3514,16 +3514,9 @@
         }
 
         // Vis token
-        let visStr = '——';
-        if (obs.visib != null) {
-          const vs = String(obs.visib);
-          if (vs === '10+') visStr = '9999';
-          else if (vs.endsWith('SM') || (parseFloat(vs) < 50 && !vs.includes('.'))) visStr = vs;
-          else {
-            const vm2 = parseFloat(vs);
-            visStr = isNaN(vm2) ? vs : (vm2 >= 9999 ? '9999' : String(Math.round(vm2)).padStart(4, '0'));
-          }
-        }
+        const visStr = visMtr != null
+          ? (visMtr >= 9999 ? '≥10' : visMtr >= 5000 ? `${Math.round(visMtr / 1000)}` : `${(visMtr / 1000).toFixed(1)}`)
+          : '——';
         const csVis = visMtr != null ? colorState(visMtr, Infinity) : null;
         const visSpan = csVis
           ? `<span style="background:${csVis.bg};color:${csVis.fg};border-radius:3px;padding:0 3px;">${visStr}</span>`
