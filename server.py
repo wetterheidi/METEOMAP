@@ -155,12 +155,6 @@ class Handler(SimpleHTTPRequestHandler):
 
             def decode_msg(handle):
                 eccodes.codes_set(handle, 'unpack', 1)
-                # Multi-subset BUFR: codes_get returns first-subset value,
-                # codes_get_array returns ALL subsets concatenated.
-                # Determine how many subsets share each array slot.
-                try:
-                    n_subsets = int(eccodes.codes_get(handle, 'numberOfSubsets') or 1)
-                except: n_subsets = 1
                 lat = _safe(handle,'latitude'); lon = _safe(handle,'longitude')
                 if lat is None or lon is None: return None
                 blk = _safe(handle,'blockNumber'); num = _safe(handle,'stationNumber')
@@ -230,14 +224,6 @@ class Handler(SimpleHTTPRequestHandler):
                 c_amt  = _safe_arr(handle,'cloudAmount')
                 c_base = _safe_arr(handle,'heightOfBaseOfCloud')
                 c_vsig = _safe_arr(handle,'verticalSignificanceSurfaceObservations')
-                # Slice to first-subset data only (multi-subset BUFR fix)
-                total = min(len(c_amt), len(c_base))
-                n = (total // n_subsets) if n_subsets > 1 and total % n_subsets == 0 \
-                    else total
-                if n_subsets > 1:
-                    c_amt  = c_amt[:n]
-                    c_base = c_base[:n]
-                    c_vsig = c_vsig[:n] if c_vsig else c_vsig
                 # Collect raw layers: skip vertSig=7 (N, total cover) and missing bases
                 raw = []
                 for i in range(n):
@@ -356,21 +342,33 @@ class Handler(SimpleHTTPRequestHandler):
                               if handle is None: break
                               msg_count += 1
                               try:
-                                obs = decode_msg(handle)
-                                if obs and obs.get('wmoId'):
-                                  if bbox:
-                                    s2,w2,n2,e2 = bbox
-                                    if not (s2<=obs['lat']<=n2 and w2<=obs['lon']<=e2):
-                                      continue
-                                  k = obs['wmoId']
-                                  if k not in seen:
-                                    seen[k] = obs; decode_ok += 1
-                              except Exception as de:
-                                decode_err += 1
-                                if decode_err <= 2:
-                                  print(f'  BUFR msg error: {type(de).__name__}: {de}')
-                              finally:
-                                eccodes.codes_release(handle)
+                                n_sub = int(eccodes.codes_get(handle,'numberOfSubsets') or 1)
+                              except: n_sub = 1
+                              for si in range(1, n_sub + 1):
+                                try:
+                                  if n_sub > 1:
+                                    sub = eccodes.codes_clone(handle)
+                                    eccodes.codes_set(sub,'extractSubset', si)
+                                    eccodes.codes_set(sub,'doExtractSubsets', 1)
+                                  else:
+                                    sub = handle
+                                  try:
+                                    obs = decode_msg(sub)
+                                    if obs and obs.get('wmoId'):
+                                      if bbox:
+                                        s2,w2,n2,e2 = bbox
+                                        if not (s2<=obs['lat']<=n2 and w2<=obs['lon']<=e2):
+                                          continue
+                                      k = obs['wmoId']
+                                      if k not in seen:
+                                        seen[k] = obs; decode_ok += 1
+                                  finally:
+                                    if n_sub > 1: eccodes.codes_release(sub)
+                                except Exception as de:
+                                  decode_err += 1
+                                  if decode_err <= 2:
+                                    print(f'  BUFR subset error: {type(de).__name__}: {de}')
+                              eccodes.codes_release(handle)
                             except Exception as le:
                               print(f'  BUFR read err: {le}'); break
                         total_decoded = sum(1 for v in seen.values() if True)
