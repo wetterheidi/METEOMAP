@@ -25,9 +25,15 @@ su - heidi -s /bin/bash -c "git clone https://github.com/wetterheidi/METEOMAP.gi
 ## 3. Python-Umgebung einrichten
 
 ```bash
+# eccodes System-Bibliothek (für BUFR-Dekodierung)
+apt-get install -y libeccodes-dev
+
 python3 -m venv /apps/MeteoMap/venv
 /apps/MeteoMap/venv/bin/pip install -r /apps/MeteoMap/repo/server/requirements.txt
 chown -R heidi:heidi /apps/MeteoMap/venv
+
+# Test
+/apps/MeteoMap/venv/bin/python -c "import eccodes; print('eccodes OK')"
 ```
 
 ---
@@ -35,17 +41,20 @@ chown -R heidi:heidi /apps/MeteoMap/venv
 ## 4. Systemd-Services installieren
 
 ```bash
-cp /apps/MeteoMap/repo/server/deploy/meteomap-api.service       /etc/systemd/system/
-cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.service  /etc/systemd/system/
-cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.timer    /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-api.service             /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.service        /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.timer          /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-bufr-collector.service   /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-bufr-collector.timer     /etc/systemd/system/
 
 systemctl daemon-reload
 
 # API-Server starten und beim Booten aktivieren
 systemctl enable --now meteomap-api.service
 
-# Collector-Timer starten (läuft alle 30 min)
+# Collector-Timer starten (laufen alle 30 min)
 systemctl enable --now meteomap-collector.timer
+systemctl enable --now meteomap-bufr-collector.timer
 ```
 
 Prüfen ob alles läuft:
@@ -80,9 +89,11 @@ Den Collector einmal manuell ausführen, damit sofort Daten vorhanden sind:
 
 ```bash
 systemctl start meteomap-collector.service
+journalctl -u meteomap-collector.service -f   # Ctrl+C wenn fertig
 
-# Fortschritt beobachten:
-journalctl -u meteomap-collector.service -f
+# BUFR-Cache befüllen (dauert ~1-2 min)
+systemctl start meteomap-bufr-collector.service
+journalctl -u meteomap-bufr-collector.service -f
 ```
 
 Das dauert ca. 1–2 Minuten (20 Blöcke × 2,5 s Pause + OGIMET-Antwortzeit).

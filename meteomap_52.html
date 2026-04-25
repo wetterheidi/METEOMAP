@@ -1535,13 +1535,13 @@
         return cached.obs;
       }
 
-      const obs = await fetch(`/dwd-synop?hours=${hours.toFixed(1)}&bbox=${bboxStr}`,
-        { signal: AbortSignal.timeout(60000) })
+      const obs = await fetch(`${SYNOP_API}/meteomap/bufr?bbox=${bboxStr}`,
+        { signal: AbortSignal.timeout(15000) })
         .then(r => r.ok ? r.json() : [])
         .catch(() => []);
 
       bufrCache.set(bboxStr, { obs, ts: Date.now() });
-      console.log(`DWD BUFR → ${obs.length} Stationen (frisch)`);
+      console.log(`DWD BUFR → ${obs.length} Stationen (Hetzner)`);
       return obs;
     }
 
@@ -3667,7 +3667,7 @@
         if (!st) return null;
         const pad = 0.5;
         const bbox = `${(st.lat - pad).toFixed(2)},${(st.lon - pad).toFixed(2)},${(st.lat + pad).toFixed(2)},${(st.lon + pad).toFixed(2)}`;
-        const bufrObs = await fetch(`/dwd-synop?hours=3&bbox=${bbox}`)
+        const bufrObs = await fetch(`${SYNOP_API}/meteomap/bufr?bbox=${bbox}`)
           .then(r => r.ok ? r.json() : [])
           .catch(() => []);
         return bufrObs.find(o => o.wmoId === wmoId) || null;

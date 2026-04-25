@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
 MeteoMap API Server
-Serves cached OGIMET SYNOP block texts to the MeteoMap client.
 
-GET /meteomap/ogimet/{block}?hours=3.0
-  → returns raw OGIMET text for that WMO block (from cache or fetched on-demand)
-
-GET /health
-  → returns status + number of cached blocks
+GET /meteomap/ogimet/{block}?hours=3.0  → OGIMET SYNOP text (cached per block)
+GET /meteomap/bufr?bbox=s,w,n,e         → DWD BUFR stations (bbox-filtered JSON)
+GET /health                             → status
 """
+import json
 import time
 import datetime
 import threading
@@ -22,6 +20,7 @@ from fastapi.responses import PlainTextResponse
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DATA_DIR        = pathlib.Path('/apps/MeteoMap/data/synop')
+BUFR_FILE       = pathlib.Path('/apps/MeteoMap/data/bufr_latest.json')
 CACHE_TTL       = 35 * 60   # seconds – collector runs every 30 min, so 35 min gives overlap
 FETCH_TIMEOUT   = 25        # seconds – OGIMET request timeout
 
@@ -109,7 +108,22 @@ def get_block(
             raise HTTPException(502, f'OGIMET fetch failed: {exc}')
 
 
+@app.get('/meteomap/bufr')
+def get_bufr(bbox: str = Query(..., description='s,w,n,e')):
+    if not BUFR_FILE.exists():
+        raise HTTPException(503, 'BUFR-Daten noch nicht verfügbar – Collector läuft noch nicht')
+    try:
+        s, w, n, e = [float(x) for x in bbox.split(',')]
+    except Exception:
+        raise HTTPException(400, 'bbox muss s,w,n,e sein')
+    all_stations = json.loads(BUFR_FILE.read_text(encoding='utf-8'))
+    filtered = [st for st in all_stations
+                if s <= st['lat'] <= n and w <= st['lon'] <= e]
+    return filtered
+
+
 @app.get('/health')
 def health():
-    cached = len(list(DATA_DIR.glob('*.txt'))) if DATA_DIR.exists() else 0
-    return {'status': 'ok', 'cached_blocks': cached}
+    cached     = len(list(DATA_DIR.glob('*.txt'))) if DATA_DIR.exists() else 0
+    bufr_ready = BUFR_FILE.exists()
+    return {'status': 'ok', 'cached_blocks': cached, 'bufr_ready': bufr_ready}

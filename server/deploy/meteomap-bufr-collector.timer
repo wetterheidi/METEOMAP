@@ -1,0 +1,11 @@
+[Unit]
+Description=MeteoMap BUFR Collector – alle 30 Minuten
+Requires=meteomap-bufr-collector.service
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
