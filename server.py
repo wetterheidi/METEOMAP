@@ -5,6 +5,7 @@ Starten: python server.py
 Öffnen:  http://localhost:8765/meteomap.html
 """
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from socketserver import ThreadingMixIn
 import urllib.request, urllib.parse, sys, os, json, io, math, datetime, re
 
 PORT = 8765
@@ -423,7 +424,9 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    srv = HTTPServer(('127.0.0.1', port), Handler)
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    srv = ThreadedHTTPServer(('127.0.0.1', port), Handler)
     url = f"http://localhost:{port}/meteomap.html"
     print(f"\n  MeteoMap-Server läuft")
     print(f"  ─────────────────────────────────────")

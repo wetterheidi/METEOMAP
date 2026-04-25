@@ -1286,7 +1286,7 @@
         throw new Error('file://-Origin blockiert – bitte server.py starten');
       }
       const url = resolveUrl(rawUrl);
-      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r;
     }
@@ -1326,6 +1326,8 @@
     let wmoStations = null;               // loaded from wmo_stations.json
     const missingStationCache = new Map();  // wmoId → station obj (fetched on demand)
     let synopObs = [];                 // parsed SYNOP observations
+    const ogimetTextCache = new Map();  // `${block}|${hoursKey}` → { text, ts }
+    const SYNOP_BLOCK_TTL = 10 * 60 * 1000; // OGIMET text valid 10 min
 
     // ── Source toggle setup ───────────────────────────────────────
     function setupSourceToggles() {
@@ -1482,48 +1484,55 @@
 
     async function loadSynopObs(bounds, hours) {
       const stations = await loadWmoStations();
-      console.log('loadSynopObs: stations=', stations ? stations.length : 'NULL');
       if (!stations) return [];
 
       const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
-      console.log('loadSynopObs: bbox=', { w, s, e, n });
       const blocks = blocksForBbox(w, s, e, n);
-      console.log('loadSynopObs: blocks=', blocks);
-      if (!blocks.length) {
-        // Sample first 3 stations to debug
-        const sample = stations.filter(st => st.wmo).slice(0, 3);
-        console.log('Sample stations:', sample);
-        return [];
-      }
+      if (!blocks.length) return [];
 
-      setStatusTxt(`SYNOP: lade ${blocks.length} Blöcke …`);
-      showLoading(`SYNOP: lade ${blocks.length} Blöcke …`, 'OGIMET → Parser → Karte');
-      const obs = [];
-
-      // ── Fetch BUFR + OGIMET in parallel, merge results ──────────
-      setStatusTxt('SYNOP: lade BUFR + OGIMET …');
-      showLoading('SYNOP: lade …', 'DWD BUFR + OGIMET parallel');
-
+      const now = Date.now();
+      // Round hours to nearest 0.5 h so minor slider jitter doesn't bust cache
+      const hoursKey = (Math.round(hours * 2) / 2).toFixed(1);
       const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
 
-      // Launch both fetches simultaneously
+      // Which blocks need a fresh fetch?
+      const staleBlocks = blocks.filter(b => {
+        const c = ogimetTextCache.get(`${b}|${hoursKey}`);
+        return !c || now - c.ts >= SYNOP_BLOCK_TTL;
+      });
+      const cachedCount = blocks.length - staleBlocks.length;
+
+      if (staleBlocks.length > 0) {
+        setStatusTxt(`SYNOP: lade ${staleBlocks.length} Blöcke … (${cachedCount} aus Cache)`);
+        showLoading('SYNOP: lade …', `${staleBlocks.length} neu · ${cachedCount} Cache · DWD BUFR`);
+      } else {
+        setStatusTxt('SYNOP: aus Cache …');
+        showLoading('SYNOP: aus Cache …', 'BUFR neu · OGIMET Cache');
+      }
+
+      // BUFR and stale OGIMET blocks in parallel
       const bufrPromise = fetch(`/dwd-synop?hours=${hours.toFixed(1)}&bbox=${bboxStr}`,
         { signal: AbortSignal.timeout(60000) })
         .then(r => r.ok ? r.json() : [])
         .catch(() => []);
 
-      const ogimetPromise = (async () => {
-        const ogObs = [];
-        for (const block of blocks) {
-          try {
-            const text = await fetchOgimetSynop(block, hours);
-            ogObs.push(...parseSynopBlock(text, stations, w, s, e, n));
-          } catch (e2) { }
-        }
-        return ogObs;
-      })();
+      const fetchBlocksPromise = Promise.all(
+        staleBlocks.map(block =>
+          fetchOgimetSynop(block, hours)
+            .then(text => ogimetTextCache.set(`${block}|${hoursKey}`, { text, ts: Date.now() }))
+            .catch(() => ogimetTextCache.set(`${block}|${hoursKey}`, { text: '', ts: Date.now() }))
+        )
+      );
 
-      const [bufrObs, ogimetObs] = await Promise.all([bufrPromise, ogimetPromise]);
+      const [bufrObs] = await Promise.all([bufrPromise, fetchBlocksPromise]);
+
+      // Parse all blocks in current view from cache (no network, fast)
+      const ogimetObs = blocks.flatMap(b => {
+        const cached = ogimetTextCache.get(`${b}|${hoursKey}`);
+        if (!cached || !cached.text) return [];
+        return parseSynopBlock(cached.text, stations, w, s, e, n);
+      });
+
       console.log(`DWD BUFR → ${bufrObs.length} | OGIMET → ${ogimetObs.length} Stationen`);
 
       // Merge: BUFR preferred over OGIMET (better data quality)
@@ -1536,8 +1545,7 @@
         const k = o.wmoId || o.icaoId;
         if (k) synopSeen.set(k, o); // BUFR overwrites OGIMET
       }
-      obs.push(...synopSeen.values());
-      return obs;
+      return [...synopSeen.values()];
     }
 
     // ── FM-12 SYNOP Parser ────────────────────────────────────────
