@@ -1,0 +1,10 @@
+[Unit]
+Description=MeteoMap SYNOP Collector (single run)
+After=network.target
+
+[Service]
+Type=oneshot
+User=heidi
+ExecStart=/apps/MeteoMap/venv/bin/python /apps/MeteoMap/repo/server/synop_collector.py
+StandardOutput=journal
+StandardError=journal

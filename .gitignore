@@ -16,3 +16,8 @@ __pycache__/
 .vscode/
 *.swp
 *.swo
+
+# Server – Laufzeitdaten (nicht ins Repo)
+server/data/
+venv/
+*.egg-info/

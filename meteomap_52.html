@@ -1258,6 +1258,10 @@
     const CACHE_TTL = 4.5 * 60 * 1000;
     const AUTO_REFRESH = 5 * 60 * 1000;
 
+    // MeteoMap Hetzner API – OGIMET-Proxy mit Cache.
+    // Leer lassen wenn der Client selbst vom Hetzner-Server ausgeliefert wird (relative URLs).
+    const SYNOP_API = 'http://178.104.206.136';
+
     // ── Origin-aware request routing ──────────────────────────────
     //  file://   → CORS blocked everywhere; show setup hint
     //  localhost → use local proxy (/proxy?url=...)
@@ -1474,11 +1478,9 @@
     }
 
     async function fetchOgimetSynop(block, hours) {
-      const now = new Date();
-      const from = new Date(now - hours * 3600000);
-      const fmt = d => d.toISOString().replace(/[-T:]/g, '').slice(0, 12);
-      const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2, '0')}&begin=${fmt(from)}&end=${fmt(now)}`;
-      const r = await corsGet(url);
+      const url = `${SYNOP_API}/meteomap/ogimet/${block}?hours=${hours.toFixed(1)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.text();
     }
 

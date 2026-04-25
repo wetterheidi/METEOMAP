@@ -1,0 +1,13 @@
+[Unit]
+Description=MeteoMap API Server
+After=network.target
+
+[Service]
+User=heidi
+WorkingDirectory=/apps/MeteoMap/repo/server
+ExecStart=/apps/MeteoMap/venv/bin/uvicorn api_server:app --host 127.0.0.1 --port 8001 --timeout-keep-alive 120
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
