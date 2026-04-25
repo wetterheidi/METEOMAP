@@ -1331,7 +1331,9 @@
     const missingStationCache = new Map();  // wmoId → station obj (fetched on demand)
     let synopObs = [];                 // parsed SYNOP observations
     const ogimetTextCache = new Map();  // `${block}|${hoursKey}` → { text, ts }
-    const SYNOP_BLOCK_TTL = 10 * 60 * 1000; // OGIMET text valid 10 min
+    const SYNOP_BLOCK_TTL = 10 * 60 * 1000;
+    const bufrCache = new Map();        // bboxStr → { obs, ts }
+    const BUFR_CACHE_TTL = 10 * 60 * 1000;
 
     // ── Source toggle setup ───────────────────────────────────────
     function setupSourceToggles() {
@@ -1484,7 +1486,8 @@
       return r.text();
     }
 
-    async function loadSynopObs(bounds, hours) {
+    // ── Phase 1: OGIMET via Hetzner-Cache (schnell, < 2 s) ───────
+    async function fetchOgimetObs(bounds, hours) {
       const stations = await loadWmoStations();
       if (!stations) return [];
 
@@ -1493,11 +1496,8 @@
       if (!blocks.length) return [];
 
       const now = Date.now();
-      // Round hours to nearest 0.5 h so minor slider jitter doesn't bust cache
       const hoursKey = (Math.round(hours * 2) / 2).toFixed(1);
-      const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
 
-      // Which blocks need a fresh fetch?
       const staleBlocks = blocks.filter(b => {
         const c = ogimetTextCache.get(`${b}|${hoursKey}`);
         return !c || now - c.ts >= SYNOP_BLOCK_TTL;
@@ -1505,20 +1505,10 @@
       const cachedCount = blocks.length - staleBlocks.length;
 
       if (staleBlocks.length > 0) {
-        setStatusTxt(`SYNOP: lade ${staleBlocks.length} Blöcke … (${cachedCount} aus Cache)`);
-        showLoading('SYNOP: lade …', `${staleBlocks.length} neu · ${cachedCount} Cache · DWD BUFR`);
-      } else {
-        setStatusTxt('SYNOP: aus Cache …');
-        showLoading('SYNOP: aus Cache …', 'BUFR neu · OGIMET Cache');
+        setStatusTxt(`SYNOP: lade ${staleBlocks.length} Blöcke … (${cachedCount} Cache)`);
       }
 
-      // BUFR and stale OGIMET blocks in parallel
-      const bufrPromise = fetch(`/dwd-synop?hours=${hours.toFixed(1)}&bbox=${bboxStr}`,
-        { signal: AbortSignal.timeout(60000) })
-        .then(r => r.ok ? r.json() : [])
-        .catch(() => []);
-
-      const fetchBlocksPromise = Promise.all(
+      await Promise.all(
         staleBlocks.map(block =>
           fetchOgimetSynop(block, hours)
             .then(text => ogimetTextCache.set(`${block}|${hoursKey}`, { text, ts: Date.now() }))
@@ -1526,28 +1516,51 @@
         )
       );
 
-      const [bufrObs] = await Promise.all([bufrPromise, fetchBlocksPromise]);
-
-      // Parse all blocks in current view from cache (no network, fast)
-      const ogimetObs = blocks.flatMap(b => {
-        const cached = ogimetTextCache.get(`${b}|${hoursKey}`);
-        if (!cached || !cached.text) return [];
-        return parseSynopBlock(cached.text, stations, w, s, e, n);
+      const obs = blocks.flatMap(b => {
+        const c = ogimetTextCache.get(`${b}|${hoursKey}`);
+        return (c && c.text) ? parseSynopBlock(c.text, stations, w, s, e, n) : [];
       });
+      console.log(`OGIMET → ${obs.length} Stationen (${cachedCount}/${blocks.length} Cache)`);
+      return obs;
+    }
 
-      console.log(`DWD BUFR → ${bufrObs.length} | OGIMET → ${ogimetObs.length} Stationen`);
+    // ── Phase 2: DWD BUFR (langsam, im Hintergrund) ───────────────
+    async function fetchBufrObs(bounds, hours) {
+      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
+      const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
 
-      // Merge: BUFR preferred over OGIMET (better data quality)
-      const synopSeen = new Map();
-      for (const o of ogimetObs) {
-        const k = o.wmoId || o.icaoId;
-        if (k) synopSeen.set(k, o);
+      const cached = bufrCache.get(bboxStr);
+      if (cached && Date.now() - cached.ts < BUFR_CACHE_TTL) {
+        console.log(`DWD BUFR → ${cached.obs.length} (Cache)`);
+        return cached.obs;
       }
-      for (const o of bufrObs) {
-        const k = o.wmoId || o.icaoId;
-        if (k) synopSeen.set(k, o); // BUFR overwrites OGIMET
+
+      const obs = await fetch(`/dwd-synop?hours=${hours.toFixed(1)}&bbox=${bboxStr}`,
+        { signal: AbortSignal.timeout(60000) })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []);
+
+      bufrCache.set(bboxStr, { obs, ts: Date.now() });
+      console.log(`DWD BUFR → ${obs.length} Stationen (frisch)`);
+      return obs;
+    }
+
+    // Merged OGIMET + BUFR: BUFR bevorzugt (bessere Qualität)
+    function mergeOgimetBufr(ogimetObs, bufrObs) {
+      const seen = new Map();
+      for (const o of ogimetObs) { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
+      for (const o of bufrObs)   { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
+      return [...seen.values()];
+    }
+
+    // METAR über SYNOP bevorzugt für gleiche Station
+    function dedupMetarSynop(combined) {
+      const seen = new Map();
+      for (const o of combined) {
+        const key = o.wmoId ? `wmo${o.wmoId}` : `icao${o.icaoId}`;
+        if (!seen.has(key) || o.metarType !== 'SYNOP') seen.set(key, o);
       }
-      return [...synopSeen.values()];
+      return [...seen.values()];
     }
 
     // ── FM-12 SYNOP Parser ────────────────────────────────────────
@@ -2914,8 +2927,8 @@
     async function updateDisplay() {
       if (isLoading) return;
       isLoading = true;
-      const srcList = [...activeSources].map(s => s.toUpperCase()).join(' + ');
-      showLoading(`Lade ${srcList} …`);
+      showLoading(`Lade ${[...activeSources].map(s => s.toUpperCase()).join(' + ')} …`);
+
       try {
         const zoom = map.getZoom();
         if (zoom < 4) {
@@ -2923,40 +2936,63 @@
           setStatus('ok'); setStatusTxt('Zoom ≥ 4 für Stationsdaten');
           return;
         }
+
         const hoursNeeded = Math.min(Math.max(1.5, Math.abs(timeOffset) + 1.5), 48);
-        const targetMs = Date.now() + timeOffset * 3600000;
-        let combined = [];
+        const targetMs    = Date.now() + timeOffset * 3600000;
+        const bounds      = map.getBounds();
 
+        // ── Phase 1: METAR + OGIMET (schnell) ──────────────────────
+        let metarObs = [];
         if (activeSources.has('metar')) {
-          allObs = await fetchMETARs(map.getBounds(), hoursNeeded);
-          console.log(`METAR API → ${allObs.length} Meldungen`);
-          combined.push(...obsAtTime(allObs, targetMs));
+          allObs   = await fetchMETARs(bounds, hoursNeeded);
+          metarObs = obsAtTime(allObs, targetMs);
         }
 
+        let ogimetObs = [];
         if (activeSources.has('synop')) {
-          const synopNew = await loadSynopObs(map.getBounds(), hoursNeeded);
-          synopObs = synopNew;
-          console.log(`SYNOP → ${synopObs.length} Meldungen`);
-          combined.push(...obsAtTime(synopObs, targetMs));
+          ogimetObs = await fetchOgimetObs(bounds, hoursNeeded);
+          synopObs  = ogimetObs;
         }
 
-        // Deduplicate: prefer METAR over SYNOP for same station
-        const seen = new Map();
-        for (const o of combined) {
-          const key = o.wmoId ? `wmo${o.wmoId}` : `icao${o.icaoId}`;
-          if (!seen.has(key) || o.metarType !== 'SYNOP') seen.set(key, o);
+        // Sofort rendern – Karte ist damit innerhalb von ~2 s befüllt
+        const phase1 = dedupMetarSynop([...metarObs, ...obsAtTime(ogimetObs, targetMs)]);
+        renderObs(phase1);
+        const ts1 = new Date().toLocaleTimeString('de-DE');
+        setStatus('ok');
+        if (activeSources.has('synop')) {
+          setStatusTxt(`${phase1.length} Stat. · BUFR lädt …`);
+        } else {
+          setStatusTxt(`${phase1.length} Stat. · ${ts1}`);
         }
-        const current = [...seen.values()];
-        console.log(`Gesamt → ${current.length} Stationen (METAR+SYNOP)`);
-        renderObs(current);
-        const ts = new Date().toLocaleTimeString('de-DE');
-        setStatus('ok'); setStatusTxt(`${current.length} Stat. (${[...activeSources].join('+').toUpperCase()}) · ${ts}`);
+        hideLoading();
+        isLoading = false;  // Karte ist wieder bedienbar
+
+        // ── Phase 2: DWD BUFR im Hintergrund (langsam) ─────────────
+        if (activeSources.has('synop')) {
+          try {
+            const bufrObs = await fetchBufrObs(bounds, hoursNeeded);
+            if (bufrObs.length > 0) {
+              const merged = mergeOgimetBufr(ogimetObs, bufrObs);
+              synopObs     = merged;
+              const phase2 = dedupMetarSynop([...metarObs, ...obsAtTime(merged, targetMs)]);
+              renderObs(phase2);
+              const ts2 = new Date().toLocaleTimeString('de-DE');
+              setStatus('ok');
+              setStatusTxt(`${phase2.length} Stat. (OGIMET+BUFR) · ${ts2}`);
+            } else {
+              const ts2 = new Date().toLocaleTimeString('de-DE');
+              setStatusTxt(`${phase1.length} Stat. (OGIMET) · ${ts2}`);
+            }
+          } catch (e2) {
+            console.warn('BUFR Hintergrundfehler:', e2);
+          }
+        }
+
       } catch (err) {
         setStatus('error'); setStatusTxt('Ladefehler – ↺ erneut versuchen');
         console.error(err);
       } finally {
-        isLoading = false;
-        hideLoading();
+        if (isLoading) { isLoading = false; hideLoading(); }
       }
     }
 
