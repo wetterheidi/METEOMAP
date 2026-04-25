@@ -22,7 +22,7 @@ from fastapi.responses import PlainTextResponse
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DATA_DIR        = pathlib.Path('/apps/MeteoMap/data/synop')
-CACHE_TTL       = 10 * 60   # seconds – serve from file if younger than this
+CACHE_TTL       = 35 * 60   # seconds – collector runs every 30 min, so 35 min gives overlap
 FETCH_TIMEOUT   = 25        # seconds – OGIMET request timeout
 
 # ── App setup ─────────────────────────────────────────────────────────────────
