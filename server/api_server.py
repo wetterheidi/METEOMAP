@@ -77,6 +77,15 @@ def get_lock(key: str) -> threading.Lock:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+_PROXY_WHITELIST = {
+    'aviationweather.gov',
+    'api.rainviewer.com',
+    'tgftp.nws.noaa.gov',
+    'www.ogimet.com',
+    'maps.dwd.de',
+}
+
+
 @app.get('/')
 def serve_index():
     return FileResponse(REPO_ROOT / 'meteomap_52.html', media_type='text/html')
@@ -85,6 +94,24 @@ def serve_index():
 @app.get('/wmo_stations.json')
 def serve_wmo_stations():
     return FileResponse(REPO_ROOT / 'wmo_stations.json', media_type='application/json')
+
+
+@app.get('/proxy')
+def cors_proxy(url: str = Query(..., description='Target URL')):
+    from urllib.parse import urlparse
+    from fastapi.responses import Response
+    host = urlparse(url).hostname or ''
+    if not any(host == w or host.endswith('.' + w) for w in _PROXY_WHITELIST):
+        raise HTTPException(403, f'Host not allowed: {host}')
+    try:
+        r = SESSION.get(url, timeout=FETCH_TIMEOUT)
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+    return Response(
+        content=r.content,
+        status_code=r.status_code,
+        media_type=r.headers.get('Content-Type', 'application/octet-stream'),
+    )
 
 
 @app.get('/meteomap/ogimet/{block}', response_class=PlainTextResponse)

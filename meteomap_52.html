@@ -1267,12 +1267,8 @@
     //  localhost → use local proxy (/proxy?url=...)
     //  real host → direct fetch (server sets CORS headers)
     function resolveUrl(rawUrl) {
-      const h = location.hostname;
-      if (h === 'localhost' || h === '127.0.0.1') {
-        // Route OGIMET requests through dedicated proxy endpoint
-        if (rawUrl.includes('ogimet.com')) {
-          return `/ogimet?url=${encodeURIComponent(rawUrl)}`;
-        }
+      // Always proxy external URLs through server to avoid CORS restrictions
+      if (rawUrl.startsWith('http')) {
         return `/proxy?url=${encodeURIComponent(rawUrl)}`;
       }
       return rawUrl;
