@@ -1260,7 +1260,7 @@
 
     // MeteoMap Hetzner API – OGIMET-Proxy mit Cache.
     // Leer lassen wenn der Client selbst vom Hetzner-Server ausgeliefert wird (relative URLs).
-    const SYNOP_API = 'http://178.104.206.136';
+    const SYNOP_API = '';  // relative URLs – nginx proxied /meteomap/ → port 8001
 
     // ── Origin-aware request routing ──────────────────────────────
     //  file://   → CORS blocked everywhere; show setup hint

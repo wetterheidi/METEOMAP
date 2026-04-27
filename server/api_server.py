@@ -15,10 +15,11 @@ import pathlib
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
+REPO_ROOT       = pathlib.Path(__file__).parent.parent
 DATA_DIR        = pathlib.Path('/apps/MeteoMap/data/synop')
 BUFR_FILE       = pathlib.Path('/apps/MeteoMap/data/bufr_latest.json')
 CACHE_TTL       = 35 * 60   # seconds – collector runs every 30 min, so 35 min gives overlap
@@ -75,6 +76,16 @@ def get_lock(key: str) -> threading.Lock:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get('/')
+def serve_index():
+    return FileResponse(REPO_ROOT / 'meteomap_52.html', media_type='text/html')
+
+
+@app.get('/wmo_stations.json')
+def serve_wmo_stations():
+    return FileResponse(REPO_ROOT / 'wmo_stations.json', media_type='application/json')
+
 
 @app.get('/meteomap/ogimet/{block}', response_class=PlainTextResponse)
 def get_block(
