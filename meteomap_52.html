@@ -2750,7 +2750,7 @@
 
         if (isNaN(t)) { t = targetMs; }
 
-        const windowMs = Math.max(2 * 60 * 60 * 1000, Math.abs(targetMs - Date.now()) + 2 * 60 * 60 * 1000);
+        const windowMs = Math.max(4 * 60 * 60 * 1000, Math.abs(targetMs - Date.now()) + 2 * 60 * 60 * 1000);
         if (t > targetMs + 90 * 60 * 1000) { skippedFuture++; continue; }
         if (t < targetMs - windowMs) { skippedOld++; continue; }
 

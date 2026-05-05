@@ -280,6 +280,7 @@ def main():
     print(f'{len(entries)} Dateien, neueste {newest.strftime("%H:%MZ")} ({age_h:.1f}h), '
           f'dekodiere {len(top)} …')
 
+    obs_cutoff = now - datetime.timedelta(hours=4)
     seen: dict[int, dict] = {}
     for fname, _, _ in top:
         url = DWD_BASE + urllib.parse.quote(fname, safe='_-.,~')
@@ -289,6 +290,9 @@ def main():
             for obs in obs_list:
                 k = obs['wmoId']
                 if k not in seen:
+                    t = obs.get('obsTime')
+                    if t and datetime.datetime.fromtimestamp(t, datetime.timezone.utc) < obs_cutoff:
+                        continue  # observation too old
                     seen[k] = obs
                     new += 1
             print(f'  {fname}: {len(obs_list)} Stationen, {new} neu (gesamt {len(seen)})')
