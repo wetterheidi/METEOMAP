@@ -3252,18 +3252,21 @@
 
     let radarLayer = null;
     let labelsLayer = null;  // political overlay for satellite mode
-    const LABELS_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png';
+    let _labelsGeojson = null;  // cached GeoJSON data
 
-    function showLabelsOverlay() {
+    async function showLabelsOverlay() {
       if (labelsLayer) return;
-      labelsLayer = L.tileLayer(LABELS_URL, {
-        attribution: '© <a href="https://carto.com/">CARTO</a>, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-        zIndex: 10,
-        pane: 'overlayPane',
-      });
-      labelsLayer.addTo(map);
+      try {
+        if (!_labelsGeojson) {
+          _labelsGeojson = await fetch('/geo/ne_countries.geojson').then(r => r.json());
+        }
+        labelsLayer = L.geoJSON(_labelsGeojson, {
+          style: { color: '#ffffff', weight: 0.7, opacity: 0.8, fillOpacity: 0 },
+          pane: 'overlayPane',
+        }).addTo(map);
+      } catch (e) {
+        console.warn('Ländergrenzen konnten nicht geladen werden:', e);
+      }
     }
     function hideLabelsOverlay() {
       if (labelsLayer) { map.removeLayer(labelsLayer); labelsLayer = null; }

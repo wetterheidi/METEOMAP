@@ -96,6 +96,14 @@ def serve_wmo_stations():
     return FileResponse(REPO_ROOT / 'wmo_stations.json', media_type='application/json')
 
 
+@app.get('/geo/{filename}')
+def serve_geo(filename: str):
+    path = REPO_ROOT / 'geo' / filename
+    if not path.exists() or not filename.endswith('.geojson'):
+        raise HTTPException(404, 'Not found')
+    return FileResponse(path, media_type='application/geo+json')
+
+
 @app.get('/proxy')
 def cors_proxy(url: str = Query(..., description='Target URL')):
     from urllib.parse import urlparse
