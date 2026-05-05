@@ -23,8 +23,8 @@ import eccodes
 DATA_DIR  = pathlib.Path('/apps/MeteoMap/data')
 OUTPUT    = DATA_DIR / 'bufr_latest.json'
 DWD_BASE  = 'https://opendata.dwd.de/weather/weather_reports/synoptic/international/'
-MAX_FILES = 12       # largest BUFR files to decode (sorted by size)
-MAX_AGE_H = 3.5      # only use files younger than this
+MAX_FILES = 30       # most recent BUFR files to decode (sorted by time)
+MAX_AGE_H = 1.5      # only use files younger than this
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -272,7 +272,7 @@ def main():
     now    = datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(hours=MAX_AGE_H)
     recent = [(n, t, sz) for n, t, sz in entries if t >= cutoff] or entries
-    recent.sort(key=lambda x: x[2], reverse=True)   # größte zuerst
+    recent.sort(key=lambda x: x[1], reverse=True)   # neueste zuerst
     top    = recent[:MAX_FILES]
 
     newest = max(t for _, t, _ in entries)
