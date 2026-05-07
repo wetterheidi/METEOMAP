@@ -1331,6 +1331,8 @@
     const SYNOP_BLOCK_TTL = 10 * 60 * 1000;
     const bufrCache = new Map();        // bboxStr → { obs, ts }
     const BUFR_CACHE_TTL = 10 * 60 * 1000;
+    const dmiCache  = new Map();        // bboxStr → { obs, ts }
+    const DMI_CACHE_TTL = 5 * 60 * 1000;
 
     // ── Source toggle setup ───────────────────────────────────────
     function setupSourceToggles() {
@@ -1521,7 +1523,28 @@
       return obs;
     }
 
-    // ── Phase 2: DWD BUFR (langsam, im Hintergrund) ───────────────
+    // ── Phase 2a: DMI Grönland ────────────────────────────────────
+    async function fetchDmiObs(bounds) {
+      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
+      const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
+
+      const cached = dmiCache.get(bboxStr);
+      if (cached && Date.now() - cached.ts < DMI_CACHE_TTL) {
+        console.log(`DMI → ${cached.obs.length} (Cache)`);
+        return cached.obs;
+      }
+
+      const obs = await fetch(`${SYNOP_API}/meteomap/dmi?bbox=${bboxStr}`,
+        { signal: AbortSignal.timeout(15000) })
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []);
+
+      dmiCache.set(bboxStr, { obs, ts: Date.now() });
+      console.log(`DMI → ${obs.length} Stationen`);
+      return obs;
+    }
+
+    // ── Phase 2b: DWD BUFR (langsam, im Hintergrund) ─────────────
     async function fetchBufrObs(bounds, hours) {
       const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
       const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
@@ -1542,11 +1565,12 @@
       return obs;
     }
 
-    // Merged OGIMET + BUFR: BUFR bevorzugt (bessere Qualität)
-    function mergeOgimetBufr(ogimetObs, bufrObs) {
+    // Merge OGIMET + BUFR + DMI — Priorität: DMI > BUFR > OGIMET
+    function mergeOgimetBufr(ogimetObs, bufrObs, dmiObs = []) {
       const seen = new Map();
       for (const o of ogimetObs) { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
       for (const o of bufrObs)   { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
+      for (const o of dmiObs)    { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
       return [...seen.values()];
     }
 
@@ -2635,9 +2659,10 @@
 
     function tooltipHTML(obs) {
       const elev = obs.elev != null ? `${Math.round(obs.elev)} m ü.NN` : '';
-      const srcClr = obs.metarType === 'SYNOP-BUFR' ? '#00e090'
-        : obs.metarType === 'SYNOP' ? '#ffb000'
-          : '#00d4ff';
+      const srcClr = obs.metarType === 'SYNOP-DMI'  ? '#00cfff'
+        : obs.metarType === 'SYNOP-BUFR' ? '#00e090'
+        : obs.metarType === 'SYNOP'      ? '#ffb000'
+        : '#00d4ff';
       const srcLabel = obs.metarType || 'METAR';
       return `<div style="background:rgba(8,12,20,.9);border:1px solid #1d2d42;padding:6px 10px;
     border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;
@@ -2964,24 +2989,23 @@
         hideLoading();
         isLoading = false;  // Karte ist wieder bedienbar
 
-        // ── Phase 2: DWD BUFR im Hintergrund (langsam) ─────────────
+        // ── Phase 2: BUFR + DMI im Hintergrund ──────────────────────
         if (activeSources.has('synop')) {
           try {
-            const bufrObs = await fetchBufrObs(bounds, hoursNeeded);
-            if (bufrObs.length > 0) {
-              const merged = mergeOgimetBufr(ogimetObs, bufrObs);
-              synopObs     = merged;
-              const phase2 = dedupMetarSynop([...metarObs, ...obsAtTime(merged, targetMs)]);
-              renderObs(phase2);
-              const ts2 = new Date().toLocaleTimeString('de-DE');
-              setStatus('ok');
-              setStatusTxt(`${phase2.length} Stat. (OGIMET+BUFR) · ${ts2}`);
-            } else {
-              const ts2 = new Date().toLocaleTimeString('de-DE');
-              setStatusTxt(`${phase1.length} Stat. (OGIMET) · ${ts2}`);
-            }
+            const [bufrObs, dmiObs] = await Promise.all([
+              fetchBufrObs(bounds, hoursNeeded),
+              fetchDmiObs(bounds),
+            ]);
+            const merged = mergeOgimetBufr(ogimetObs, bufrObs, dmiObs);
+            synopObs     = merged;
+            const phase2 = dedupMetarSynop([...metarObs, ...obsAtTime(merged, targetMs)]);
+            renderObs(phase2);
+            const ts2  = new Date().toLocaleTimeString('de-DE');
+            const srcs = [bufrObs.length > 0 && 'BUFR', dmiObs.length > 0 && 'DMI'].filter(Boolean).join('+');
+            setStatus('ok');
+            setStatusTxt(`${phase2.length} Stat. (OGIMET${srcs ? '+' + srcs : ''}) · ${ts2}`);
           } catch (e2) {
-            console.warn('BUFR Hintergrundfehler:', e2);
+            console.warn('BUFR/DMI Hintergrundfehler:', e2);
           }
         }
 

@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 REPO_ROOT       = pathlib.Path(__file__).parent.parent
 DATA_DIR        = pathlib.Path('/apps/MeteoMap/data/synop')
 BUFR_FILE       = pathlib.Path('/apps/MeteoMap/data/bufr_latest.json')
+DMI_FILE        = pathlib.Path('/apps/MeteoMap/data/dmi_latest.json')
 CACHE_TTL       = 35 * 60   # seconds – collector runs every 30 min, so 35 min gives overlap
 FETCH_TIMEOUT   = 25        # seconds – OGIMET request timeout
 
@@ -163,6 +164,20 @@ def get_bufr(bbox: str = Query(..., description='s,w,n,e')):
     except Exception:
         raise HTTPException(400, 'bbox muss s,w,n,e sein')
     all_stations = json.loads(BUFR_FILE.read_text(encoding='utf-8'))
+    filtered = [st for st in all_stations
+                if s <= st['lat'] <= n and w <= st['lon'] <= e]
+    return filtered
+
+
+@app.get('/meteomap/dmi')
+def get_dmi(bbox: str = Query(..., description='s,w,n,e')):
+    if not DMI_FILE.exists():
+        raise HTTPException(503, 'DMI-Daten noch nicht verfügbar – Collector läuft noch nicht')
+    try:
+        s, w, n, e = [float(x) for x in bbox.split(',')]
+    except Exception:
+        raise HTTPException(400, 'bbox muss s,w,n,e sein')
+    all_stations = json.loads(DMI_FILE.read_text(encoding='utf-8'))
     filtered = [st for st in all_stations
                 if s <= st['lat'] <= n and w <= st['lon'] <= e]
     return filtered
