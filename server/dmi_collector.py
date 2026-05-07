@@ -55,8 +55,7 @@ SESSION.headers.update({'User-Agent': 'Mozilla/5.0 (compatible; MeteoMap/1.0)'})
 def fetch_stations() -> dict[str, dict]:
     """Return dict of stationId → {name, lat, lon, elev, wmoId}."""
     r = SESSION.get(
-        f'{BASE_URL}/station/items',
-        params={'bbox': GL_BBOX, 'limit': 200},
+        f'{BASE_URL}/station/items?bbox={GL_BBOX}&limit=200',
         timeout=20,
     )
     r.raise_for_status()
@@ -84,17 +83,15 @@ def fetch_stations() -> dict[str, dict]:
 
 def fetch_observations(period: str = 'latest-hour') -> dict[str, dict]:
     """Return dict of stationId → {parameterId: (value, observed_dt)}."""
-    r = SESSION.get(
-        f'{BASE_URL}/observation/items',
-        params={
-            'bbox':        GL_BBOX,
-            'parameterId': ','.join(PARAMS),
-            'period':      period,
-            'sortorder':   'observed,DESC',
-            'limit':       300000,
-        },
-        timeout=30,
+    # Build URL manually — requests would percent-encode commas in parameterId/sortorder
+    qs = (
+        f'bbox={GL_BBOX}'
+        f'&parameterId={",".join(PARAMS)}'
+        f'&period={period}'
+        f'&sortorder=observed,DESC'
+        f'&limit=10000'
     )
+    r = SESSION.get(f'{BASE_URL}/observation/items?{qs}', timeout=30)
     r.raise_for_status()
     result: dict[str, dict] = {}
     for f in r.json().get('features', []):
