@@ -83,14 +83,8 @@ def fetch_stations() -> dict[str, dict]:
 
 def fetch_observations(period: str = 'latest-hour') -> dict[str, dict]:
     """Return dict of stationId → {parameterId: (value, observed_dt)}."""
-    # Build URL manually — requests would percent-encode commas in parameterId/sortorder
-    qs = (
-        f'bbox={GL_BBOX}'
-        f'&parameterId={",".join(PARAMS)}'
-        f'&period={period}'
-        f'&sortorder=observed,DESC'
-        f'&limit=10000'
-    )
+    # No parameterId filter — fetch all parameters for Greenland bbox at once
+    qs = f'bbox={GL_BBOX}&period={period}&limit=10000'
     r = SESSION.get(f'{BASE_URL}/observation/items?{qs}', timeout=30)
     r.raise_for_status()
     result: dict[str, dict] = {}
