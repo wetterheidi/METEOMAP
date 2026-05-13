@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
 MeteoMap BUFR Collector
-Downloads DWD SYNOP BUFR files, decodes all stations, saves as JSON.
+Downloads DWD SYNOP BUFR files, decodes all stations, saves to SQLite.
 Run every 30 minutes via systemd timer.
-
-Output: /apps/MeteoMap/data/bufr_latest.json
 """
 import sys
 import json
@@ -18,10 +16,12 @@ import urllib.parse
 import requests
 import eccodes
 
+from obs_store import open_store
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DATA_DIR  = pathlib.Path('/apps/MeteoMap/data')
-OUTPUT    = DATA_DIR / 'bufr_latest.json'
+OUTPUT    = DATA_DIR / 'bufr_latest.json'   # legacy JSON, kept for old /meteomap/bufr route
 DWD_BASE  = 'https://opendata.dwd.de/weather/weather_reports/synoptic/international/'
 MAX_FILES = 30       # most recent BUFR files to decode (sorted by time)
 MAX_AGE_H = 1.5      # only use files younger than this
@@ -281,27 +281,47 @@ def main():
           f'dekodiere {len(top)} …')
 
     obs_cutoff = now - datetime.timedelta(hours=4)
-    seen: dict[int, dict] = {}
+    all_obs: list[dict] = []
+    seen_legacy: dict[int, dict] = {}   # newest-per-station for legacy JSON
+
     for fname, _, _ in top:
         url = DWD_BASE + urllib.parse.quote(fname, safe='_-.,~')
         try:
             obs_list = decode_bufr_url(url)
             new = 0
             for obs in obs_list:
+                t = obs.get('obsTime')
+                if not t:
+                    continue
+                if datetime.datetime.fromtimestamp(t, datetime.timezone.utc) < obs_cutoff:
+                    continue
+                all_obs.append(obs)
                 k = obs['wmoId']
-                if k not in seen:
-                    t = obs.get('obsTime')
-                    if t and datetime.datetime.fromtimestamp(t, datetime.timezone.utc) < obs_cutoff:
-                        continue  # observation too old
-                    seen[k] = obs
-                    new += 1
-            print(f'  {fname}: {len(obs_list)} Stationen, {new} neu (gesamt {len(seen)})')
+                if k not in seen_legacy or t > (seen_legacy[k].get('obsTime') or 0):
+                    seen_legacy[k] = obs
+                new += 1
+            print(f'  {fname}: {len(obs_list)} Stationen, {new} verwertbar (gesamt {len(all_obs)})')
         except Exception as exc:
             print(f'  {fname}: FAIL {exc}', file=sys.stderr)
 
-    result = list(seen.values())
+    # ── SQLite (neue Architektur) ─────────────────────────────────────────────
+    written = 0
+    with open_store() as db:
+        for obs in all_obs:
+            skey = f'WMO{obs["wmoId"]:05d}'
+            try:
+                db.upsert('synop-bufr', skey, obs['obsTime'],
+                          obs['lat'], obs['lon'], obs)
+                written += 1
+            except Exception as exc:
+                print(f'  SQLite upsert FAIL {skey}: {exc}', file=sys.stderr)
+        removed = db.cleanup()
+    print(f'SQLite: {written} Zeilen geschrieben, {removed} alte gelöscht')
+
+    # ── Legacy JSON (für /meteomap/bufr bis Frontend-Migration) ──────────────
+    result = list(seen_legacy.values())
     OUTPUT.write_text(json.dumps(result), encoding='utf-8')
-    print(f'Fertig: {len(result)} Stationen → {OUTPUT}')
+    print(f'Fertig: {len(result)} Stationen (Legacy-JSON) → {OUTPUT}')
 
 if __name__ == '__main__':
     main()

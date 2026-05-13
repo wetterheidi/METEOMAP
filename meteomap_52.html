@@ -1326,13 +1326,9 @@
     let activeSources = new Set(['metar']); // 'metar' | 'synop'
     let wmoStations = null;               // loaded from wmo_stations.json
     const missingStationCache = new Map();  // wmoId → station obj (fetched on demand)
-    let synopObs = [];                 // parsed SYNOP observations
-    const ogimetTextCache = new Map();  // `${block}|${hoursKey}` → { text, ts }
-    const SYNOP_BLOCK_TTL = 10 * 60 * 1000;
-    const bufrCache = new Map();        // bboxStr → { obs, ts }
-    const BUFR_CACHE_TTL = 10 * 60 * 1000;
-    const dmiCache  = new Map();        // bboxStr → { obs, ts }
-    const DMI_CACHE_TTL = 5 * 60 * 1000;
+    let synopObs = [];                    // latest fetched SYNOP observations (for re-render)
+    const synopCache = new Map();         // `${bboxKey}|${tKey}` → { obs, ts }
+    const SYNOP_CACHE_TTL = 3 * 60 * 1000;  // 3 min — collector runs every 30 min
 
     // ── Source toggle setup ───────────────────────────────────────
     function setupSourceToggles() {
@@ -1344,7 +1340,7 @@
       if (activeSources.has(src) && activeSources.size === 1) return; // keep at least one
       if (activeSources.has(src)) {
         activeSources.delete(src);
-        if (src === 'synop') synopObs = [];
+        if (src === 'synop') { synopObs = []; synopCache.clear(); }
       } else {
         activeSources.add(src);
       }
@@ -1418,154 +1414,35 @@
 
     // Static WMO block → approximate geographic coverage
     // Overlap check: does block region intersect the map bbox?
-    const WMO_BLOCKS = [
-      { b: 1, s: 55, n: 90, w: -90, e: 20 },  // Iceland, Greenland
-      { b: 2, s: 49, n: 72, w: -12, e: 5 },  // UK, Ireland, Norway coast
-      { b: 3, s: 41, n: 55, w: -10, e: 10 },  // France (incl. Corsica ~9°E)
-      { b: 4, s: 25, n: 50, w: -20, e: 10 },  // Azores, NW Africa
-      { b: 5, s: 10, n: 40, w: -20, e: 25 },  // N Africa W
-      { b: 6, s: 44, n: 75, w: 3, e: 35 },  // Scandinavia + Netherlands/Belgium/Switzerland
-      { b: 7, s: 35, n: 65, w: 0, e: 22 },  // Benelux, Denmark, N/C Europe
-      { b: 8, s: 10, n: 40, w: 5, e: 35 },  // N Africa C
-      { b: 9, s: 10, n: 40, w: 25, e: 55 },  // N Africa E
-      { b: 10, s: 46, n: 56, w: 5, e: 16 },  // Germany, Austria-W, Switzerland-E
-      { b: 11, s: 43, n: 56, w: 12, e: 27 },  // Austria-E, Czech, Slovakia, Hungary, Croatia-N
-      { b: 12, s: 48, n: 56, w: 14, e: 25 },  // Poland
-      { b: 13, s: 43, n: 58, w: 22, e: 38 },  // Romania, Ukraine W
-      { b: 14, s: 40, n: 56, w: 14, e: 35 },  // Balkans, Croatia, Serbia, Bosnia
-      { b: 15, s: 35, n: 45, w: -10, e: 5 },  // Iberia
-      { b: 16, s: 35, n: 48, w: 5, e: 20 },  // Italy, Adriatic coast
-      { b: 17, s: 30, n: 45, w: 25, e: 45 },  // Turkey, Middle East
-      { b: 20, s: 55, n: 75, w: 25, e: 65 },  // Russia W
-      { b: 21, s: 55, n: 75, w: 55, e: 95 },  // Russia C
-      { b: 23, s: 50, n: 70, w: 55, e: 100 },  // Russia
-      { b: 24, s: 45, n: 65, w: 85, e: 135 },  // Russia E
-      { b: 25, s: 55, n: 80, w: 95, e: 150 },  // Russia far E
-      { b: 26, s: 44, n: 60, w: 23, e: 42 },  // Ukraine, Belarus
-      { b: 27, s: 50, n: 68, w: 35, e: 65 },  // Russia Urals
-      { b: 28, s: 35, n: 55, w: 50, e: 80 },  // Central Asia
-      { b: 30, s: 25, n: 45, w: 45, e: 75 },  // Iran, Afghanistan
-      { b: 31, s: 15, n: 40, w: 0, e: 25 },  // N Africa / Sahara
-      { b: 32, s: 0, n: 25, w: 0, e: 25 },  // W Africa
-      { b: 33, s: -20, n: 10, w: 0, e: 30 },  // C Africa
-      { b: 34, s: -40, n: 5, w: 10, e: 45 },  // S Africa W
-      { b: 35, s: -40, n: 5, w: 30, e: 55 },  // S Africa E
-      { b: 40, s: 15, n: 40, w: 35, e: 75 },  // Arabian Peninsula
-      { b: 41, s: 5, n: 30, w: 60, e: 80 },  // Pakistan, NW India
-      { b: 42, s: 10, n: 35, w: 65, e: 90 },  // India
-      { b: 43, s: 10, n: 30, w: 85, e: 110 },  // SE Asia N
-      { b: 44, s: -10, n: 20, w: 90, e: 125 },  // SE Asia S
-      { b: 45, s: 20, n: 45, w: 95, e: 135 },  // China
-      { b: 46, s: 30, n: 55, w: 100, e: 145 },  // China N, Korea
-      { b: 47, s: 25, n: 50, w: 125, e: 150 },  // Japan
-      { b: 48, s: -10, n: 30, w: 100, e: 135 },  // SE Asia
-      { b: 60, s: -30, n: 35, w: -20, e: 20 },  // W Africa
-      { b: 61, s: -20, n: 20, w: 20, e: 55 },  // E Africa
-      { b: 71, s: 45, n: 80, w: -145, e: -55 },  // Canada
-      { b: 72, s: 25, n: 50, w: -130, e: -65 },  // USA E
-      { b: 74, s: 15, n: 30, w: -100, e: -65 },  // Mexico, Caribbean
-      { b: 76, s: -10, n: 25, w: -95, e: -55 },  // C America
-      { b: 80, s: -60, n: 15, w: -85, e: -30 },  // S America
-      { b: 89, s: -90, n: -60, w: -180, e: 180 },  // Antarctica
-      { b: 94, s: -45, n: -10, w: 110, e: 160 },  // Australia
-      { b: 96, s: -30, n: 10, w: 130, e: 180 },  // Pacific W
-    ];
 
-    function blocksForBbox(west, south, east, north) {
-      return WMO_BLOCKS
-        .filter(r => r.s < north && r.n > south && r.w < east && r.e > west)
-        .map(r => r.b)
-        .sort((a, b) => a - b);
-    }
 
-    async function fetchOgimetSynop(block, hours) {
-      const url = `${SYNOP_API}/meteomap/ogimet/${block}?hours=${hours.toFixed(1)}`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(25000) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.text();
-    }
-
-    // ── Phase 1: OGIMET via Hetzner-Cache (schnell, < 2 s) ───────
-    async function fetchOgimetObs(bounds, hours) {
-      const stations = await loadWmoStations();
-      if (!stations) return [];
-
-      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
-      const blocks = blocksForBbox(w, s, e, n);
-      if (!blocks.length) return [];
-
-      const now = Date.now();
-      const hoursKey = (Math.round(hours * 2) / 2).toFixed(1);
-
-      const staleBlocks = blocks.filter(b => {
-        const c = ogimetTextCache.get(`${b}|${hoursKey}`);
-        return !c || now - c.ts >= SYNOP_BLOCK_TTL;
-      });
-      const cachedCount = blocks.length - staleBlocks.length;
-
-      if (staleBlocks.length > 0) {
-        setStatusTxt(`SYNOP: lade ${staleBlocks.length} Blöcke … (${cachedCount} Cache)`);
-      }
-
-      await Promise.all(
-        staleBlocks.map(block =>
-          fetchOgimetSynop(block, hours)
-            .then(text => ogimetTextCache.set(`${block}|${hoursKey}`, { text, ts: Date.now() }))
-            .catch(() => ogimetTextCache.set(`${block}|${hoursKey}`, { text: '', ts: Date.now() }))
-        )
-      );
-
-      const obs = blocks.flatMap(b => {
-        const c = ogimetTextCache.get(`${b}|${hoursKey}`);
-        return (c && c.text) ? parseSynopBlock(c.text, stations, w, s, e, n) : [];
-      });
-      console.log(`OGIMET → ${obs.length} Stationen (${cachedCount}/${blocks.length} Cache)`);
-      return obs;
-    }
-
-    // ── Phase 2a: DMI Grönland ────────────────────────────────────
-    async function fetchDmiObs(bounds) {
-      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
+    // ── Unified SYNOP fetch via /obs endpoint ─────────────────────
+    async function fetchSynopObs(bounds, targetMs) {
+      const w = bounds.getWest(), s = bounds.getSouth(),
+            e = bounds.getEast(), n = bounds.getNorth();
       const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
+      const tSec    = Math.round(targetMs / 1000);
+      // Round to 5-min bucket for cache key (server data changes only on collector run)
+      const tKey    = Math.round(tSec / 300) * 300;
+      const cacheKey = `${bboxStr}|${tKey}`;
 
-      const cached = dmiCache.get(bboxStr);
-      if (cached && Date.now() - cached.ts < DMI_CACHE_TTL) {
-        console.log(`DMI → ${cached.obs.length} (Cache)`);
+      const cached = synopCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < SYNOP_CACHE_TTL) {
+        console.log(`SYNOP /obs → ${cached.obs.length} (Cache)`);
         return cached.obs;
       }
 
-      const obs = await fetch(`${SYNOP_API}/meteomap/dmi?bbox=${bboxStr}`,
+      const obs = await fetch(`${SYNOP_API}/obs?bbox=${bboxStr}&t=${tSec}`,
         { signal: AbortSignal.timeout(15000) })
         .then(r => r.ok ? r.json() : [])
         .catch(() => []);
 
-      dmiCache.set(bboxStr, { obs, ts: Date.now() });
-      console.log(`DMI → ${obs.length} Stationen`);
+      synopCache.set(cacheKey, { obs, ts: Date.now() });
+      console.log(`SYNOP /obs → ${obs.length} Stationen`);
       return obs;
     }
 
-    // ── Phase 2b: DWD BUFR (langsam, im Hintergrund) ─────────────
-    async function fetchBufrObs(bounds, hours) {
-      const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
-      const bboxStr = `${s.toFixed(2)},${w.toFixed(2)},${n.toFixed(2)},${e.toFixed(2)}`;
-
-      const cached = bufrCache.get(bboxStr);
-      if (cached && Date.now() - cached.ts < BUFR_CACHE_TTL) {
-        console.log(`DWD BUFR → ${cached.obs.length} (Cache)`);
-        return cached.obs;
-      }
-
-      const obs = await fetch(`${SYNOP_API}/meteomap/bufr?bbox=${bboxStr}`,
-        { signal: AbortSignal.timeout(15000) })
-        .then(r => r.ok ? r.json() : [])
-        .catch(() => []);
-
-      bufrCache.set(bboxStr, { obs, ts: Date.now() });
-      console.log(`DWD BUFR → ${obs.length} Stationen (Hetzner)`);
-      return obs;
-    }
-
-    // Merge OGIMET + BUFR + DMI — Priorität: DMI > BUFR > OGIMET
+    // kept for legacy use (Monitor-Tab, station popup)
     function mergeOgimetBufr(ogimetObs, bufrObs, dmiObs = []) {
       const seen = new Map();
       for (const o of ogimetObs) { const k = o.wmoId || o.icaoId; if (k) seen.set(k, o); }
@@ -2963,51 +2840,23 @@
         const targetMs    = Date.now() + timeOffset * 3600000;
         const bounds      = map.getBounds();
 
-        // ── Phase 1: METAR + OGIMET (schnell) ──────────────────────
+        // ── METAR (AWC, direkt) ───────────────────────────────────
         let metarObs = [];
         if (activeSources.has('metar')) {
           allObs   = await fetchMETARs(bounds, hoursNeeded);
           metarObs = obsAtTime(allObs, targetMs);
         }
 
-        let ogimetObs = [];
+        // ── SYNOP (unified /obs endpoint, server-seitig zeitgefiltert) ──
         if (activeSources.has('synop')) {
-          ogimetObs = await fetchOgimetObs(bounds, hoursNeeded);
-          synopObs  = ogimetObs;
+          synopObs = await fetchSynopObs(bounds, targetMs);
         }
 
-        // Sofort rendern – Karte ist damit innerhalb von ~2 s befüllt
-        const phase1 = dedupMetarSynop([...metarObs, ...obsAtTime(ogimetObs, targetMs)]);
-        renderObs(phase1);
-        const ts1 = new Date().toLocaleTimeString('de-DE');
+        const combined = dedupMetarSynop([...metarObs, ...synopObs]);
+        renderObs(combined);
+        const ts = new Date().toLocaleTimeString('de-DE');
         setStatus('ok');
-        if (activeSources.has('synop')) {
-          setStatusTxt(`${phase1.length} Stat. · BUFR lädt …`);
-        } else {
-          setStatusTxt(`${phase1.length} Stat. · ${ts1}`);
-        }
-        hideLoading();
-        isLoading = false;  // Karte ist wieder bedienbar
-
-        // ── Phase 2: BUFR + DMI im Hintergrund ──────────────────────
-        if (activeSources.has('synop')) {
-          try {
-            const [bufrObs, dmiObs] = await Promise.all([
-              fetchBufrObs(bounds, hoursNeeded),
-              fetchDmiObs(bounds),
-            ]);
-            const merged = mergeOgimetBufr(ogimetObs, bufrObs, dmiObs);
-            synopObs     = merged;
-            const phase2 = dedupMetarSynop([...metarObs, ...obsAtTime(merged, targetMs)]);
-            renderObs(phase2);
-            const ts2  = new Date().toLocaleTimeString('de-DE');
-            const srcs = [bufrObs.length > 0 && 'BUFR', dmiObs.length > 0 && 'DMI'].filter(Boolean).join('+');
-            setStatus('ok');
-            setStatusTxt(`${phase2.length} Stat. (OGIMET${srcs ? '+' + srcs : ''}) · ${ts2}`);
-          } catch (e2) {
-            console.warn('BUFR/DMI Hintergrundfehler:', e2);
-          }
-        }
+        setStatusTxt(`${combined.length} Stat. · ${ts}`);
 
       } catch (err) {
         setStatus('error'); setStatusTxt('Ladefehler – ↺ erneut versuchen');
@@ -3107,9 +2956,10 @@
     }
 
     function rerenderFromCache() {
-      if (!allObs.length) return;
       const targetMs = Date.now() + timeOffset * 3600000;
-      renderObs(obsAtTime(allObs, targetMs));
+      const metarObs = allObs.length ? obsAtTime(allObs, targetMs) : [];
+      // synopObs already time-filtered by server; slider drag triggers debouncedUpdate for fresh fetch
+      renderObs(dedupMetarSynop([...metarObs, ...synopObs]));
     }
 
     // ═══════════════════════════════════════════════════════════════

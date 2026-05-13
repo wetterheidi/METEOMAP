@@ -2,8 +2,10 @@
 """
 MeteoMap API Server
 
-GET /meteomap/ogimet/{block}?hours=3.0  → OGIMET SYNOP text (cached per block)
-GET /meteomap/bufr?bbox=s,w,n,e         → DWD BUFR stations (bbox-filtered JSON)
+GET /obs?bbox=s,w,n,e&t=<unix>          → unified SYNOP obs for a timestamp (SQLite)
+GET /meteomap/ogimet/{block}?hours=3.0  → OGIMET SYNOP text (legacy, cached per block)
+GET /meteomap/bufr?bbox=s,w,n,e         → DWD BUFR stations (legacy JSON)
+GET /meteomap/dmi?bbox=s,w,n,e          → DMI stations (legacy JSON)
 GET /health                             → status
 """
 import json
@@ -15,7 +17,9 @@ import pathlib
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+
+from obs_store import open_store, WINDOW_S
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -181,6 +185,46 @@ def get_dmi(bbox: str = Query(..., description='s,w,n,e')):
     filtered = [st for st in all_stations
                 if s <= st['lat'] <= n and w <= st['lon'] <= e]
     return filtered
+
+
+@app.get('/obs')
+def get_obs(
+    bbox: str = Query(..., description='s,w,n,e'),
+    t:    int = Query(None, description='Target Unix timestamp (seconds UTC); omit for now'),
+):
+    """
+    Return merged SYNOP observations (OGIMET + BUFR + DMI) closest to timestamp t
+    within ±30 min, filtered by bbox.
+    Source priority for duplicate stations: DMI > BUFR > OGIMET.
+    """
+    try:
+        s, w, n, e = [float(x) for x in bbox.split(',')]
+    except Exception:
+        raise HTTPException(400, 'bbox muss s,w,n,e sein')
+
+    target_t = t if t is not None else int(time.time())
+
+    with open_store() as db:
+        raw = db.query(target_t, s, w, n, e)
+
+    # Source priority merge: DMI > BUFR > OGIMET
+    # metarType values: 'SYNOP' (OGIMET), 'SYNOP-BUFR', 'SYNOP-DMI'
+    SOURCE_PRIO = {'SYNOP': 0, 'SYNOP-BUFR': 1, 'SYNOP-DMI': 2}
+    merged: dict[str, dict] = {}
+    for obs in raw:
+        key = str(obs.get('wmoId') or obs.get('icaoId') or '')
+        if not key:
+            continue
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = obs
+        else:
+            prio_new = SOURCE_PRIO.get(obs.get('metarType', ''), 0)
+            prio_old = SOURCE_PRIO.get(existing.get('metarType', ''), 0)
+            if prio_new > prio_old:
+                merged[key] = obs
+
+    return list(merged.values())
 
 
 @app.get('/health')

@@ -2,9 +2,7 @@
 """
 MeteoMap DMI Collector
 Fetches near-real-time observations from the DMI Open Data API for Greenland stations.
-Run every 15 minutes via cron (same as bufr_collector).
-
-Output: /apps/MeteoMap/data/dmi_latest.json
+Run every 15 minutes via systemd timer.
 """
 import sys
 import json
@@ -14,10 +12,12 @@ import pathlib
 
 import requests
 
+from obs_store import open_store
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DATA_DIR = pathlib.Path('/apps/MeteoMap/data')
-OUTPUT   = DATA_DIR / 'dmi_latest.json'
+OUTPUT   = DATA_DIR / 'dmi_latest.json'   # legacy JSON, kept for old /meteomap/dmi route
 BASE_URL = 'https://opendataapi.dmi.dk/v2/metObs/collections'
 
 # Greenland bounding box: minLon, minLat, maxLon, maxLat
@@ -228,8 +228,25 @@ def main():
             continue
         result.append(obs)
 
+    # ── SQLite (neue Architektur) ─────────────────────────────────────────────
+    written = 0
+    with open_store() as db:
+        for obs in result:
+            skey = f'DMI{obs["icaoId"].replace("DMI", "")}' if obs.get('icaoId') else None
+            if not skey or obs.get('obsTime') is None:
+                continue
+            try:
+                db.upsert('synop-dmi', skey, obs['obsTime'],
+                          obs['lat'], obs['lon'], obs)
+                written += 1
+            except Exception as exc:
+                print(f'  SQLite upsert FAIL {skey}: {exc}', file=sys.stderr)
+        removed = db.cleanup()
+    print(f'SQLite: {written} Zeilen geschrieben, {removed} alte gelöscht')
+
+    # ── Legacy JSON (für /meteomap/dmi bis Frontend-Migration) ───────────────
     OUTPUT.write_text(json.dumps(result), encoding='utf-8')
-    print(f'Fertig: {len(result)} Stationen → {OUTPUT}')
+    print(f'Fertig: {len(result)} Stationen (Legacy-JSON) → {OUTPUT}')
 
 
 if __name__ == '__main__':
