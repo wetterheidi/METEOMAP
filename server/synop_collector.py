@@ -51,7 +51,7 @@ def load_wmo_stations() -> dict[int, dict]:
         return _WMO_STATIONS
     with open(p, encoding='utf-8') as f:
         lst = json.load(f)
-    _WMO_STATIONS = {int(s['id']): s for s in lst if 'id' in s}
+    _WMO_STATIONS = {int(s['wmo']): s for s in lst if 'wmo' in s}
     print(f'WMO-Stationen geladen: {len(_WMO_STATIONS)}')
     return _WMO_STATIONS
 
