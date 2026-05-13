@@ -4,7 +4,7 @@ Requires=meteomap-bufr-collector.service
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=30min
+OnUnitActiveSec=10min
 Persistent=true
 
 [Install]

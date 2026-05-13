@@ -2,7 +2,7 @@
 """
 MeteoMap BUFR Collector
 Downloads DWD SYNOP BUFR files, decodes all stations, saves to SQLite.
-Run every 30 minutes via systemd timer.
+Run every 10 minutes via systemd timer; only new files (not yet seen) are decoded.
 """
 import sys
 import json
@@ -20,11 +20,12 @@ from obs_store import open_store
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-DATA_DIR  = pathlib.Path('/apps/MeteoMap/data')
-OUTPUT    = DATA_DIR / 'bufr_latest.json'   # legacy JSON, kept for old /meteomap/bufr route
-DWD_BASE  = 'https://opendata.dwd.de/weather/weather_reports/synoptic/international/'
-MAX_FILES = 30       # most recent BUFR files to decode (sorted by time)
-MAX_AGE_H = 1.5      # only use files younger than this
+DATA_DIR   = pathlib.Path('/apps/MeteoMap/data')
+OUTPUT     = DATA_DIR / 'bufr_latest.json'   # legacy JSON, kept for old /meteomap/bufr route
+SEEN_FILE  = DATA_DIR / 'bufr_seen_files.json'
+DWD_BASE   = 'https://opendata.dwd.de/weather/weather_reports/synoptic/international/'
+MAX_FILES  = 10      # max new files to decode per run (at 10-min takt: ~2 new files expected)
+MAX_AGE_H  = 1.5     # only consider files younger than this
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -255,6 +256,22 @@ def decode_bufr_url(url: str) -> list[dict]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def load_seen() -> set[str]:
+    try:
+        return set(json.loads(SEEN_FILE.read_text(encoding='utf-8')))
+    except Exception:
+        return set()
+
+
+def save_seen(seen: set[str], all_entries: list[tuple]) -> None:
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=MAX_AGE_H + 0.5)
+    still_recent = {fname for fname, fts, _ in all_entries if fts >= cutoff}
+    SEEN_FILE.write_text(
+        json.dumps(sorted(seen & still_recent), ensure_ascii=False),
+        encoding='utf-8',
+    )
+
+
 def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -269,22 +286,28 @@ def main():
         print('Keine BUFR-Dateien gefunden.', file=sys.stderr)
         sys.exit(1)
 
-    now    = datetime.datetime.now(datetime.timezone.utc)
-    cutoff = now - datetime.timedelta(hours=MAX_AGE_H)
-    recent = [(n, t, sz) for n, t, sz in entries if t >= cutoff] or entries
+    now      = datetime.datetime.now(datetime.timezone.utc)
+    cutoff   = now - datetime.timedelta(hours=MAX_AGE_H)
+    recent   = [(n, t, sz) for n, t, sz in entries if t >= cutoff]
     recent.sort(key=lambda x: x[1], reverse=True)   # neueste zuerst
-    top    = recent[:MAX_FILES]
 
-    newest = max(t for _, t, _ in entries)
-    age_h  = (now - newest).total_seconds() / 3600
-    print(f'{len(entries)} Dateien, neueste {newest.strftime("%H:%MZ")} ({age_h:.1f}h), '
-          f'dekodiere {len(top)} …')
+    seen     = load_seen()
+    new_only = [(n, t, sz) for n, t, sz in recent if n not in seen][:MAX_FILES]
+
+    newest   = max((t for _, t, _ in entries), default=now)
+    age_h    = (now - newest).total_seconds() / 3600
+    print(f'{len(entries)} Dateien gesamt, {len(recent)} aktuell, '
+          f'{len(new_only)} neu – neueste {newest.strftime("%H:%MZ")} ({age_h:.1f}h)')
+
+    if not new_only:
+        print('Keine neuen Dateien – fertig.')
+        sys.exit(0)
 
     obs_cutoff = now - datetime.timedelta(hours=4)
     all_obs: list[dict] = []
     seen_legacy: dict[int, dict] = {}   # newest-per-station for legacy JSON
 
-    for fname, _, _ in top:
+    for fname, _, _ in new_only:
         url = DWD_BASE + urllib.parse.quote(fname, safe='_-.,~')
         try:
             obs_list = decode_bufr_url(url)
@@ -303,6 +326,10 @@ def main():
             print(f'  {fname}: {len(obs_list)} Stationen, {new} verwertbar (gesamt {len(all_obs)})')
         except Exception as exc:
             print(f'  {fname}: FAIL {exc}', file=sys.stderr)
+
+    # ── Seen-Files aktualisieren ──────────────────────────────────────────────
+    seen.update(fname for fname, _, _ in new_only)
+    save_seen(seen, recent)
 
     # ── SQLite (neue Architektur) ─────────────────────────────────────────────
     written = 0
