@@ -25,7 +25,7 @@ from contextlib import contextmanager
 
 DB_PATH      = pathlib.Path('/apps/MeteoMap/data/obs.sqlite3')
 RETAIN_HOURS = 12   # hours of history kept
-WINDOW_S     = 1800  # ±30 min query window
+WINDOW_S     = 5400  # ±90 min query window (SYNOP hourly + collector delay + buffer)
 
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
