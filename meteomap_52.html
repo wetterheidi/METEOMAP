@@ -1457,7 +1457,7 @@
       const seen = new Map();
       for (const o of combined) {
         const key = o.wmoId ? `wmo${o.wmoId}` : `icao${o.icaoId}`;
-        if (!seen.has(key) || o.metarType !== 'SYNOP') seen.set(key, o);
+        if (!seen.has(key) || o.metarType === 'METAR') seen.set(key, o);
       }
       return [...seen.values()];
     }
