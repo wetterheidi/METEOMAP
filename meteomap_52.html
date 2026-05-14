@@ -1457,7 +1457,12 @@
       const seen = new Map();
       for (const o of combined) {
         const key = o.wmoId ? `wmo${o.wmoId}` : `icao${o.icaoId}`;
-        if (!seen.has(key) || o.metarType === 'METAR') seen.set(key, o);
+        const existing = seen.get(key);
+        if (!existing) { seen.set(key, o); continue; }
+        const ageNew = o._ageMin ?? 0;
+        const ageOld = existing._ageMin ?? 0;
+        if (ageNew < ageOld || (ageNew === ageOld && o.metarType === 'METAR'))
+          seen.set(key, o);
       }
       return [...seen.values()];
     }
