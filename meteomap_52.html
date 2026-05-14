@@ -1437,6 +1437,7 @@
         .then(r => r.ok ? r.json() : [])
         .catch(() => []);
 
+      obs.forEach(o => { o._ageMin = Math.abs(o.obsTime - tSec) / 60; });
       synopCache.set(cacheKey, { obs, ts: Date.now() });
       console.log(`SYNOP /obs → ${obs.length} Stationen`);
       return obs;
@@ -2438,9 +2439,11 @@
     // Estimate pixel width of text in JetBrains Mono 11px bold
     function estW(text) { return Math.round(text.length * 7.5 + 14); }
     function ageOpacity(ageMin) {
-      if (ageMin <= 30) return 1.0;
-      if (ageMin >= 90) return 0.35;
-      return 1.0 - 0.65 * (ageMin - 30) / 60;
+      if (ageMin < 20)  return 1.0;
+      if (ageMin < 35)  return 0.7;
+      if (ageMin < 50)  return 0.4;
+      if (ageMin <= 60) return 0.2;
+      return 0.0;
     }
 
     function createMarker(obs, params) {
@@ -2810,6 +2813,7 @@
       let ok = 0, fail = 0;
       for (const o of subset) {
         if (o.lat == null || o.lon == null) continue;
+        if (ageOpacity(o._ageMin || 0) === 0) continue;
         try { markerLayer.addLayer(createMarker(o, selectedParams)); ok++; }
         catch (e) { fail++; if (fail <= 3) console.warn(`Marker [${o.icaoId}]:`, e.message); }
       }

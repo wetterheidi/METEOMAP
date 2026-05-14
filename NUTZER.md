@@ -84,7 +84,7 @@ navigiert werden.
 **Wie er funktioniert:**
 
 Für jeden Zeitpunkt im Schieber wird die nächstgelegene verfügbare Meldung
-(innerhalb ±90 Minuten) pro Station angezeigt. Bei SYNOPs bedeutet das: Du siehst
+(innerhalb ±60 Minuten) pro Station angezeigt. Bei SYNOPs bedeutet das: Du siehst
 immer den Termin, der dem gewählten Zeitpunkt am nächsten liegt – also typischerweise
 den Stundentermin unmittelbar vor oder nach dem eingestellten Zeitpunkt.
 
