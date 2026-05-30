@@ -98,8 +98,8 @@ def decode_msg(handle) -> dict | None:
 
     tk   = _safe(handle, 'airTemperature')
     dk   = _safe(handle, 'dewpointTemperature')
-    temp = round(tk - 273.15, 1) if tk else None
-    dewp = round(dk - 273.15, 1) if dk else None
+    temp = round(tk - 273.15, 1) if tk and tk > 183.0 else None   # 183 K = -90 °C
+    dewp = round(dk - 273.15, 1) if dk and dk > 183.0 else None
 
     ws   = _safe(handle, 'windSpeed')
     wd   = _safe(handle, 'windDirection')
