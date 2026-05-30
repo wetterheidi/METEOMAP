@@ -1258,6 +1258,8 @@
     const MAX_MARKERS = 700;
     const CACHE_TTL = 4.5 * 60 * 1000;
     const AUTO_REFRESH = 2 * 60 * 1000;
+    const TEMP_HOT_THRESHOLD  = 30;   // °C — above: prefer highest temps
+    const TEMP_COLD_THRESHOLD = -10;  // °C — below: prefer lowest temps
 
     // MeteoMap Hetzner API – OGIMET-Proxy mit Cache.
     // Leer lassen wenn der Client selbst vom Hetzner-Server ausgeliefert wird (relative URLs).
@@ -1637,6 +1639,7 @@
             if (mapped && mapped.includes('TS'))
               console.warn(`[SYNOP WW] Station ${obs.wmoId} ww=${ww} Gruppe="${t}" → "${mapped}"`);
             obs.wxString = mapped;
+            obs.wwCode = ww;   // raw code (0–99) for severity scoring
           }
         }
         // Section 3 marker: stop at 333
@@ -2726,6 +2729,36 @@
       return 5.0 / Math.pow(2, zoom - 4);
     }
 
+    // Maps a METAR wx string to a severity score (0–99) for thinning decisions.
+    // Higher = more significant weather event.
+    function wxSeverity(wx) {
+      if (!wx) return 0;
+      const s = wx.toUpperCase();
+      if (s.includes('FC'))                          return 99; // tornado/waterspout
+      if (s.includes('+TS') || s.includes('TSGR'))  return 95;
+      if (s.includes('TS'))                          return 90;
+      if (s.includes('+FZRA'))                       return 85;
+      if (s.includes('FZRA'))                        return 80;
+      if (s.includes('+SHSN') || s.includes('+SHPL')) return 78;
+      if (s.includes('FZDZ'))                        return 75;
+      if (s.includes('SHSN') || s.includes('SHPL')) return 70;
+      if (s.includes('+FG'))                         return 68;
+      if (s.includes('FG'))                          return 65;
+      if (s.includes('SHRA'))                        return 62;
+      if (s.includes('+RA') || s.includes('+SN'))   return 60;
+      if (s.includes('GR') || s.includes('GS'))     return 58;
+      if (s.includes('DS') || s.includes('SS'))     return 55;
+      if (s.includes('SN') || s.includes('PL'))     return 50;
+      if (s.includes('RASN'))                        return 48;
+      if (s.includes('RA'))                          return 45;
+      if (s.includes('-SN'))                         return 38;
+      if (s.includes('-RA') || s.includes('DZ'))    return 32;
+      if (s.includes('BR'))                          return 18;
+      if (s.includes('HZ') || s.includes('FU'))     return 12;
+      if (s.includes('DU') || s.includes('SA') || s.includes('VA')) return 22;
+      return 8; // any other present weather token
+    }
+
     // Returns a score for how meteorologically "interesting" a station is
     // for the given parameter. Higher = keep this station over neighbours.
     function meteoScore(obs, pid) {
@@ -2747,11 +2780,10 @@
         }
         case 'wind_barb':
         case 'wind_speed':
-          return obs.wspd ?? 0;
         case 'wind_gust':
-          return obs.wgst ?? obs.wspd ?? 0;
+          return Math.max(obs.wspd ?? 0, obs.wgst ?? 0);
         case 'wind_dir':
-          return obs.wspd ?? 0;   // prefer windier stations
+          return Math.max(obs.wspd ?? 0, obs.wgst ?? 0);
         case 'pressure': {
           const q = parseQNH(obs.altim);
           return q ? Math.abs(q - 1013) : 0;
@@ -2759,9 +2791,16 @@
         case 'pres_tend':
           return Math.abs(obs.presTend ?? 0);
         case 'ww':
-          return obs.wxString ? 100 : 0;
-        case 'temperature':
-          return obs.temp != null ? Math.abs(obs.temp) : 0;
+          // SYNOP: use raw ww code (0–99); METAR: map wxString to severity
+          if (obs.wwCode != null) return obs.wwCode;
+          return wxSeverity(obs.wxString);
+        case 'temperature': {
+          const t = obs.temp;
+          if (t == null) return 0;
+          if (t >= TEMP_HOT_THRESHOLD)  return t;         // prefer highest above threshold
+          if (t <= TEMP_COLD_THRESHOLD) return -t;        // prefer lowest below threshold
+          return 0;
+        }
         case 'dewpoint':
           return obs.dewp != null ? Math.abs(obs.dewp) : 0;
         case 'clouds_lo': {
