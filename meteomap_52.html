@@ -3262,7 +3262,7 @@
 
       // ── SATELLITE (DWD WMS) ────────────────────────────────────
       if (satOn) {
-        updateDWDSat();
+        updateDWDSat(true);
         if (!radarOn) {
           const prod = document.getElementById('ov-satproduct');
           timeInfo.textContent = `◎ Satellit · ${prod.options[prod.selectedIndex].text} · DWD/EUMETSAT`;
@@ -3281,10 +3281,10 @@
       return 'https://maps.dwd.de/geoserver/dwd/wms';
     }
 
-    function updateDWDSat() {
+    function updateDWDSat(force = false) {
       const product = document.getElementById('ov-satproduct').value;
       console.log('DWD SAT layer:', product);
-      if (satLayer && satLayer._dwdProduct === product) {
+      if (!force && satLayer && satLayer._dwdProduct === product) {
         satLayer.setOpacity(ovOpacity);
         return;
       }
@@ -3372,7 +3372,11 @@
 
     // Auto-refresh every 5 min when showing current data
     setInterval(() => {
-      if (timeOffset >= -0.05) { dataCache.clear(); updateDisplay(); }
+      if (timeOffset >= -0.05) {
+        dataCache.clear();
+        updateDisplay();
+        updateOverlays();
+      }
     }, AUTO_REFRESH);
 
     // Initial load
