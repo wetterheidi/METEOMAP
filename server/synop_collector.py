@@ -198,6 +198,18 @@ def parse_synop_line(line: str, stations: dict[int, dict]) -> dict | None:
     if obs['lat'] is None or obs['lon'] is None:
         return None
 
+    # OOXX = automatic/unmanned station report. Its group layout differs from
+    # AAXX in ways that aren't reliably documented (e.g. the slot that lines up
+    # with the 1SnTTT temperature group actually carries skin/surface
+    # temperature, several degrees above the real air temperature — confirmed
+    # against DWD BUFR ground truth). Every OOXX-reporting station observed so
+    # far also sends a correct AAXX report for the same obsTime, and the store
+    # upserts by (source, station, obsTime) — so returning an obs here would
+    # silently clobber the good AAXX row instead of just being redundant.
+    # Drop OOXX lines entirely rather than risk showing wrong values.
+    if raw.startswith('OOXX'):
+        return None
+
     # Wind indicator from AAXX header
     aam = re.search(r'AAXX\s+\d{4}(\d)', raw)
     wind_ind = int(aam.group(1)) if aam else 1  # 0-2 = m/s, 3-4 = kt
@@ -232,7 +244,7 @@ def parse_synop_line(line: str, stations: dict[int, dict]) -> dict | None:
             cover = _COVERS[n_val] if n_val < len(_COVERS) else None
             if cover and cover != 'SKC':
                 obs['skyCondition'] = [{'skyCover': cover, 'cloudBase': None}]
-        i += 1
+            i += 1
 
     sec3_start = tokens.index('333') if '333' in tokens else -1
     sec5_start = tokens.index('555') if '555' in tokens else -1
