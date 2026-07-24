@@ -3201,6 +3201,17 @@
     let ovOpacity = 0.70;
     const ovColor = 4;   // RainViewer free: color fixed (API key needed for choice)
 
+    // Radar and satellite each keep their own #ov-time-info line so both stay
+    // visible when both overlays are on, instead of one clobbering the other.
+    let radarInfoHtml = '';
+    let satInfoHtml = '';
+    function renderTimeInfo() {
+      const parts = [];
+      if (radarOn && radarInfoHtml) parts.push(radarInfoHtml);
+      if (satOn && satInfoHtml) parts.push(satInfoHtml);
+      document.getElementById('ov-time-info').innerHTML = parts.join('<br>');
+    }
+
     // Fetch + cache RainViewer metadata JSON
     async function getRVMeta() {
       if (rvMeta && Date.now() - rvMetaTs < RV_META_TTL) return rvMeta;
@@ -3236,7 +3247,6 @@
       }
 
       const targetSec = Math.round((Date.now() + timeOffset * 3600000) / 1000);
-      const timeInfo = document.getElementById('ov-time-info');
 
       // ── RADAR ──────────────────────────────────────────────────
       if (radarOn && meta) {
@@ -3259,18 +3269,17 @@
 
         // Nowcast indicator
         const isNow = (meta.radar.nowcast || []).some(f => f.time === frame.time);
-        timeInfo.innerHTML = `◉ Radar ${rvFmtTime(frame.time)}${isNow ? ' <span style="color:var(--amber)">▶ Nowcast</span>' : ''}`;
+        radarInfoHtml = `◉ Radar ${rvFmtTime(frame.time)}${isNow ? ' <span style="color:var(--amber)">▶ Nowcast</span>' : ''}`;
       }
 
       // ── SATELLITE (EUMETSAT WMS) ────────────────────────────────
       if (satOn) {
         const resolvedMs = await updateEumetsatSat();
-        if (!radarOn) {
-          const prod = document.getElementById('ov-satproduct');
-          timeInfo.innerHTML = satTimeInfoHtml(prod, resolvedMs);
-        }
+        const prod = document.getElementById('ov-satproduct');
+        satInfoHtml = satTimeInfoHtml(prod, resolvedMs);
       }
 
+      renderTimeInfo();
       document.getElementById('overlay-controls').style.display = 'block';
     }
 
@@ -3422,7 +3431,8 @@
         if (satOn) {
           const resolvedMs = await updateEumetsatSat();
           const prod = document.getElementById('ov-satproduct');
-          document.getElementById('ov-time-info').innerHTML = satTimeInfoHtml(prod, resolvedMs);
+          satInfoHtml = satTimeInfoHtml(prod, resolvedMs);
+          renderTimeInfo();
         }
       });
     }
