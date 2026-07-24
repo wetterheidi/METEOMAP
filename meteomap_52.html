@@ -1166,8 +1166,10 @@
           <div id="ov-satproduct-row" style="display:none;">
             <span class="ov-label">Kanal</span>
             <select id="ov-satproduct">
-              <option value="Satellite_meteosat_1km_euat_rgb_day_hrv_and_night_ir108_3h">HRV/IR (Tag+Nacht)</option>
-              <option value="Satellite_worldmosaic_3km_world_ir108_3h">IR 10.8 µm (Global)</option>
+              <option value="msg_fes:rgb_natural">Natural Color RGB</option>
+              <option value="msg_fes:rgb_dust">Dust RGB</option>
+              <option value="mtg_fd:ir105_hrfi">IR 10,5 µm (MTG HRFI)</option>
+              <option value="msg_fes:vis006">VIS 0,6 µm (nur tagsüber)</option>
             </select>
           </div>
         </div>
@@ -3260,97 +3262,98 @@
         timeInfo.innerHTML = `◉ Radar ${rvFmtTime(frame.time)}${isNow ? ' <span style="color:var(--amber)">▶ Nowcast</span>' : ''}`;
       }
 
-      // ── SATELLITE (DWD WMS) ────────────────────────────────────
+      // ── SATELLITE (EUMETSAT WMS) ────────────────────────────────
       if (satOn) {
-        const imgTime = await updateDWDSat();
+        const resolvedMs = await updateEumetsatSat();
         if (!radarOn) {
           const prod = document.getElementById('ov-satproduct');
-          timeInfo.innerHTML = satTimeInfoHtml(prod, imgTime, targetSec);
+          timeInfo.innerHTML = satTimeInfoHtml(prod, resolvedMs);
         }
       }
 
       document.getElementById('overlay-controls').style.display = 'block';
     }
 
-    // ── DWD WMS Satellite ─────────────────────────────────────────
-    // /wms endpoint in server.py transparently proxies to maps.dwd.de/geoserver/dwd/wms
-    // On a real web host, point directly at DWD (they allow CORS).
-    function dwdWmsBase() {
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-        return '/wms';
-      return 'https://maps.dwd.de/geoserver/dwd/wms';
+    // ── EUMETSAT WMS Satellite (EUMETView) ──────────────────────────
+    // view.eumetsat.int is CORS-open (access-control-allow-origin: *) and needs
+    // no authentication — unlike DWD, always call it directly, even from
+    // localhost, no proxy required.
+    const EUMETSAT_WMS_BASE = 'https://view.eumetsat.int/geoserver/wms';
+    const EUMETSAT_CAPS_URL = `${EUMETSAT_WMS_BASE}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities`;
+    const EUMETSAT_CAPS_TTL = 10 * 60 * 1000;
+    const SAT_PRODUCTS = ['msg_fes:rgb_natural', 'msg_fes:rgb_dust', 'mtg_fd:ir105_hrfi', 'msg_fes:vis006'];
+
+    function parseISODuration(s) {
+      const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(s || '');
+      if (!m) return null;
+      const h = Number(m[1] || 0), mi = Number(m[2] || 0), se = Number(m[3] || 0);
+      return ((h * 60 + mi) * 60 + se) * 1000;
     }
 
-    // DWD only publishes these satellite products every 3h (00,03,...,21 UTC) — the WMS
-    // GetCapabilities <Dimension name="time"> extent's end value is the timestamp of the
-    // actual latest image, not "now". We fetch it so the UI always shows the real image age
-    // instead of implying the picture is as fresh as the live station data drawn on top of it.
-    let satCapsXml = null;
-    let satCapsTs = 0;
-    const SAT_CAPS_TTL = 10 * 60 * 1000;  // re-check interval; images themselves only change every 3h
-    const SAT_WARN_MIN = 195;             // past a full 3h cycle + margin → flag as running late
-    const SAT_STALE_MIN = 240;            // clearly overdue → DWD missed a publish cycle
-
-    async function getSatCaps() {
-      if (satCapsXml && Date.now() - satCapsTs < SAT_CAPS_TTL) return satCapsXml;
-      const resp = await corsGet(`${dwdWmsBase()}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities`);
-      const text = await resp.text();
-      satCapsXml = new DOMParser().parseFromString(text, 'text/xml');
-      satCapsTs = Date.now();
-      return satCapsXml;
-    }
-
-    // Reads the <Dimension name="time"> of a given WMS layer, formatted by DWD as
-    // "start/end/period" (e.g. .../2026-07-24T18:00:00.000Z/PT3H). `end` is the latest
-    // available image.
-    function satTimeExtent(xmlDoc, layerName) {
-      for (const nameEl of xmlDoc.getElementsByTagName('Name')) {
-        if (nameEl.textContent !== layerName || nameEl.parentNode.tagName !== 'Layer') continue;
-        const dim = Array.from(nameEl.parentNode.children).find(c => c.tagName === 'Dimension');
-        if (!dim || !dim.textContent.trim()) return null;
-        const parts = dim.textContent.trim().split('/');
-        if (parts.length === 3) return { start: parts[0], end: parts[1], period: parts[2] };
-        const vals = dim.textContent.trim().split(',');
-        return { start: vals[0], end: vals[vals.length - 1], period: null };
+    // Each layer's <Dimension name="time"> is a "start/end/step" interval, not an
+    // explicit list of timestamps. GeoServer snaps any TIME we send to the nearest
+    // raster point itself (nearestValue="1"), but it reports which point it picked
+    // only in the Warning response header — which the browser can't read here (no
+    // Access-Control-Expose-Headers: Warning, confirmed empirically). So we parse
+    // the interval ourselves and round client-side, matching what the server does.
+    function parseSatExtents(xmlDoc, productIds) {
+      const extents = {};
+      for (const layer of xmlDoc.getElementsByTagName('Layer')) {
+        const nameEl = Array.from(layer.children).find(c => c.tagName === 'Name');
+        if (!nameEl || !productIds.includes(nameEl.textContent)) continue;
+        const dimEl = Array.from(layer.children).find(c => c.tagName === 'Dimension' && c.getAttribute('name') === 'time');
+        if (!dimEl) continue;
+        const [startStr, endStr, stepStr] = dimEl.textContent.trim().split('/');
+        const startMs = Date.parse(startStr), endMs = Date.parse(endStr), stepMs = parseISODuration(stepStr);
+        if (!startMs || !endMs || !stepMs) continue;
+        extents[nameEl.textContent] = { startMs, endMs, stepMs };
       }
-      return null;
+      return extents;
     }
 
-    async function getSatImageTime(product) {
-      try {
-        const ext = satTimeExtent(await getSatCaps(), product);
-        return ext ? new Date(ext.end) : null;
-      } catch (e) {
-        console.warn('DWD WMS Zeitdimension konnte nicht geladen werden:', e.message);
-        return null;
-      }
+    let satExtents = null;
+    let satExtentsTs = 0;
+
+    async function getSatExtents() {
+      if (satExtents && Date.now() - satExtentsTs < EUMETSAT_CAPS_TTL) return satExtents;
+      const resp = await fetch(EUMETSAT_CAPS_URL, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const xmlDoc = new DOMParser().parseFromString(await resp.text(), 'application/xml');
+      satExtents = parseSatExtents(xmlDoc, SAT_PRODUCTS);
+      satExtentsTs = Date.now();
+      return satExtents;
     }
 
-    function satAgeLabel(gapMin) {
-      const h = Math.floor(gapMin / 60), m = Math.round(gapMin % 60);
-      return h > 0 ? `${h}h ${m}min` : `${m}min`;
+    // Round the requested time onto the product's raster step and clamp to the
+    // published range — mirrors the server's own nearestValue snapping so the
+    // displayed timestamp always matches the tile actually rendered.
+    function resolveSatTime(extents, product, targetMs) {
+      const ext = extents[product];
+      if (!ext) return null;
+      const clamped = Math.min(ext.endMs, Math.max(ext.startMs, targetMs));
+      const steps = Math.round((clamped - ext.startMs) / ext.stepMs);
+      return ext.startMs + steps * ext.stepMs;
     }
 
-    // Builds the #ov-time-info label for the satellite overlay: the real image timestamp,
-    // plus a visible warning if it lags far behind the displayed time (targetSec).
-    function satTimeInfoHtml(prodSelect, imgTime, targetSec) {
+    function satTimeInfoHtml(prodSelect, resolvedMs) {
       const label = prodSelect.options[prodSelect.selectedIndex].text;
-      if (!imgTime) return `◎ Satellit · ${label} · DWD/EUMETSAT`;
-      const ageStr = rvFmtTime(imgTime.getTime() / 1000);
-      const gapMin = (targetSec - imgTime.getTime() / 1000) / 60;
-      let warn = '';
-      if (gapMin > SAT_STALE_MIN) warn = ` <span style="color:var(--red)">⚠ ${satAgeLabel(gapMin)} alt</span>`;
-      else if (gapMin > SAT_WARN_MIN) warn = ` <span style="color:var(--amber)">⚠ ${satAgeLabel(gapMin)} alt</span>`;
-      return `◎ Satellit ${ageStr} · ${label}${warn}`;
+      if (resolvedMs == null) return `◎ Satellit · ${label} · EUMETSAT`;
+      return `◎ Satellit ${rvFmtTime(resolvedMs / 1000)} · ${label}`;
     }
 
-    async function updateDWDSat() {
+    async function updateEumetsatSat() {
       const product = document.getElementById('ov-satproduct').value;
-      const imgTime = await getSatImageTime(product);
-      const timeParam = imgTime ? imgTime.toISOString() : null;
-      if (satLayer && satLayer._dwdProduct === product && satLayer._dwdTime === timeParam) {
+      const targetMs = Date.now() + timeOffset * 3600000;
+      let resolvedMs = null;
+      try {
+        resolvedMs = resolveSatTime(await getSatExtents(), product, targetMs);
+      } catch (e) {
+        console.warn('EUMETSAT Zeitdimension konnte nicht geladen werden:', e.message);
+      }
+      const timeParam = resolvedMs != null ? new Date(resolvedMs).toISOString() : null;
+      if (satLayer && satLayer._eumProduct === product && satLayer._eumTime === timeParam) {
         satLayer.setOpacity(ovOpacity);
-        return imgTime;
+        return resolvedMs;
       }
       if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
       const wmsOptions = {
@@ -3360,16 +3363,16 @@
         opacity: ovOpacity,
         version: '1.3.0',
         uppercase: false,
-        attribution: 'Satellit: <a href="https://www.dwd.de" target="_blank">DWD</a> / EUMETSAT',
+        attribution: '&copy; <a href="https://www.eumetsat.int" target="_blank">EUMETSAT</a>',
         zIndex: 4,
       };
       if (timeParam) wmsOptions.time = timeParam;
-      satLayer = L.tileLayer.wms(dwdWmsBase(), wmsOptions);
-      satLayer._dwdProduct = product;
-      satLayer._dwdTime = timeParam;
+      satLayer = L.tileLayer.wms(EUMETSAT_WMS_BASE, wmsOptions);
+      satLayer._eumProduct = product;
+      satLayer._eumTime = timeParam;
       satLayer.addTo(map);
-      console.log(`DWD WMS layer added: ${product}${timeParam ? ' @ ' + timeParam : ''} via ${dwdWmsBase()}`);
-      return imgTime;
+      console.log(`EUMETSAT WMS layer added: ${product}${timeParam ? ' @ ' + timeParam : ''}`);
+      return resolvedMs;
     }
 
     function removeRadar() {
@@ -3414,13 +3417,12 @@
         if (satLayer) satLayer.setOpacity(ovOpacity);
       });
 
-      // Satellite product (DWD WMS)
+      // Satellite product (EUMETSAT WMS)
       document.getElementById('ov-satproduct').addEventListener('change', async () => {
         if (satOn) {
-          const targetSec = Math.round((Date.now() + timeOffset * 3600000) / 1000);
-          const imgTime = await updateDWDSat();
+          const resolvedMs = await updateEumetsatSat();
           const prod = document.getElementById('ov-satproduct');
-          document.getElementById('ov-time-info').innerHTML = satTimeInfoHtml(prod, imgTime, targetSec);
+          document.getElementById('ov-time-info').innerHTML = satTimeInfoHtml(prod, resolvedMs);
         }
       });
     }

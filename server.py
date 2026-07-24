@@ -43,62 +43,6 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_error(502, str(e))
             return
 
-        if parsed.path == '/wms-caps':
-            # Returns JSON list of available WMS layer names containing keyword
-            kw  = urllib.parse.parse_qs(parsed.query).get('kw',[''])[0].upper()
-            url = 'https://maps.dwd.de/geoserver/dwd/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities'
-            req = urllib.request.Request(url, headers={
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120',
-                'Accept':     'text/xml,*/*',
-                'Referer':    'https://maps.dwd.de/'
-            })
-            try:
-                import re, json as _json
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    caps = r.read().decode('utf-8','replace')
-                names = re.findall(r'<Name>([^<]+)</Name>', caps)
-                filtered = [n for n in names if kw in n.upper()] if kw else names
-                result = _json.dumps(sorted(set(filtered))).encode()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(result)
-            except Exception as e:
-                self.send_error(502, str(e))
-            return
-
-        if parsed.path == '/wms':
-            # Transparent WMS proxy for DWD satellite
-            qs   = parsed.query
-            dest = f'https://maps.dwd.de/geoserver/dwd/wms?{qs}'
-            print(f'  WMS ← {dest}')
-            try:
-                req = urllib.request.Request(dest, headers={
-                    'User-Agent': 'MeteoMap/1.0',
-                    'Referer':    'http://localhost:8765/'
-                })
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    data        = r.read()
-                    ctype       = r.headers.get('Content-Type','image/png')
-                    status      = r.status
-                print(f'  WMS → {status} {ctype} ({len(data)} bytes)')
-                if 'xml' in ctype.lower():
-                    print(f'  WMS XML: {data.decode("utf-8","replace")}')
-                self.send_response(200)
-                self.send_header('Content-Type', ctype)
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(data)
-            except urllib.error.HTTPError as e:
-                body = e.read().decode('utf-8','replace')[:300]
-                print(f'  WMS HTTPError {e.code}: {body}')
-                self.send_error(e.code, str(e))
-            except Exception as e:
-                print(f'  WMS Error: {e}  url={dest[:120]}')
-                self.send_error(502, str(e))
-            return
-
         if parsed.path == '/ogimet':
             # Proxy for OGIMET SYNOP data
             qs  = urllib.parse.parse_qs(parsed.query)
@@ -418,7 +362,7 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         # Only log proxy/API calls, suppress static file noise
         first = str(args[0]) if args else ''
-        if any(p in first for p in ['/proxy','/wms','/ogimet','/dwd','/bufr']):
+        if any(p in first for p in ['/proxy','/ogimet','/dwd','/bufr']):
             print(f"  → {first[:80]}")
 
 if __name__ == '__main__':
