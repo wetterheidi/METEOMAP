@@ -3262,10 +3262,10 @@
 
       // ── SATELLITE (DWD WMS) ────────────────────────────────────
       if (satOn) {
-        updateDWDSat(true);
+        const imgTime = await updateDWDSat();
         if (!radarOn) {
           const prod = document.getElementById('ov-satproduct');
-          timeInfo.textContent = `◎ Satellit · ${prod.options[prod.selectedIndex].text} · DWD/EUMETSAT`;
+          timeInfo.innerHTML = satTimeInfoHtml(prod, imgTime, targetSec);
         }
       }
 
@@ -3281,15 +3281,79 @@
       return 'https://maps.dwd.de/geoserver/dwd/wms';
     }
 
-    function updateDWDSat(force = false) {
+    // DWD only publishes these satellite products every 3h (00,03,...,21 UTC) — the WMS
+    // GetCapabilities <Dimension name="time"> extent's end value is the timestamp of the
+    // actual latest image, not "now". We fetch it so the UI always shows the real image age
+    // instead of implying the picture is as fresh as the live station data drawn on top of it.
+    let satCapsXml = null;
+    let satCapsTs = 0;
+    const SAT_CAPS_TTL = 10 * 60 * 1000;  // re-check interval; images themselves only change every 3h
+    const SAT_WARN_MIN = 195;             // past a full 3h cycle + margin → flag as running late
+    const SAT_STALE_MIN = 240;            // clearly overdue → DWD missed a publish cycle
+
+    async function getSatCaps() {
+      if (satCapsXml && Date.now() - satCapsTs < SAT_CAPS_TTL) return satCapsXml;
+      const resp = await corsGet(`${dwdWmsBase()}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities`);
+      const text = await resp.text();
+      satCapsXml = new DOMParser().parseFromString(text, 'text/xml');
+      satCapsTs = Date.now();
+      return satCapsXml;
+    }
+
+    // Reads the <Dimension name="time"> of a given WMS layer, formatted by DWD as
+    // "start/end/period" (e.g. .../2026-07-24T18:00:00.000Z/PT3H). `end` is the latest
+    // available image.
+    function satTimeExtent(xmlDoc, layerName) {
+      for (const nameEl of xmlDoc.getElementsByTagName('Name')) {
+        if (nameEl.textContent !== layerName || nameEl.parentNode.tagName !== 'Layer') continue;
+        const dim = Array.from(nameEl.parentNode.children).find(c => c.tagName === 'Dimension');
+        if (!dim || !dim.textContent.trim()) return null;
+        const parts = dim.textContent.trim().split('/');
+        if (parts.length === 3) return { start: parts[0], end: parts[1], period: parts[2] };
+        const vals = dim.textContent.trim().split(',');
+        return { start: vals[0], end: vals[vals.length - 1], period: null };
+      }
+      return null;
+    }
+
+    async function getSatImageTime(product) {
+      try {
+        const ext = satTimeExtent(await getSatCaps(), product);
+        return ext ? new Date(ext.end) : null;
+      } catch (e) {
+        console.warn('DWD WMS Zeitdimension konnte nicht geladen werden:', e.message);
+        return null;
+      }
+    }
+
+    function satAgeLabel(gapMin) {
+      const h = Math.floor(gapMin / 60), m = Math.round(gapMin % 60);
+      return h > 0 ? `${h}h ${m}min` : `${m}min`;
+    }
+
+    // Builds the #ov-time-info label for the satellite overlay: the real image timestamp,
+    // plus a visible warning if it lags far behind the displayed time (targetSec).
+    function satTimeInfoHtml(prodSelect, imgTime, targetSec) {
+      const label = prodSelect.options[prodSelect.selectedIndex].text;
+      if (!imgTime) return `◎ Satellit · ${label} · DWD/EUMETSAT`;
+      const ageStr = rvFmtTime(imgTime.getTime() / 1000);
+      const gapMin = (targetSec - imgTime.getTime() / 1000) / 60;
+      let warn = '';
+      if (gapMin > SAT_STALE_MIN) warn = ` <span style="color:var(--red)">⚠ ${satAgeLabel(gapMin)} alt</span>`;
+      else if (gapMin > SAT_WARN_MIN) warn = ` <span style="color:var(--amber)">⚠ ${satAgeLabel(gapMin)} alt</span>`;
+      return `◎ Satellit ${ageStr} · ${label}${warn}`;
+    }
+
+    async function updateDWDSat() {
       const product = document.getElementById('ov-satproduct').value;
-      console.log('DWD SAT layer:', product);
-      if (!force && satLayer && satLayer._dwdProduct === product) {
+      const imgTime = await getSatImageTime(product);
+      const timeParam = imgTime ? imgTime.toISOString() : null;
+      if (satLayer && satLayer._dwdProduct === product && satLayer._dwdTime === timeParam) {
         satLayer.setOpacity(ovOpacity);
-        return;
+        return imgTime;
       }
       if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
-      satLayer = L.tileLayer.wms(dwdWmsBase(), {
+      const wmsOptions = {
         layers: product,
         format: 'image/png',
         transparent: true,
@@ -3298,10 +3362,14 @@
         uppercase: false,
         attribution: 'Satellit: <a href="https://www.dwd.de" target="_blank">DWD</a> / EUMETSAT',
         zIndex: 4,
-      });
+      };
+      if (timeParam) wmsOptions.time = timeParam;
+      satLayer = L.tileLayer.wms(dwdWmsBase(), wmsOptions);
       satLayer._dwdProduct = product;
+      satLayer._dwdTime = timeParam;
       satLayer.addTo(map);
-      console.log(`DWD WMS layer added: ${product} via ${dwdWmsBase()}`);
+      console.log(`DWD WMS layer added: ${product}${timeParam ? ' @ ' + timeParam : ''} via ${dwdWmsBase()}`);
+      return imgTime;
     }
 
     function removeRadar() {
@@ -3347,13 +3415,12 @@
       });
 
       // Satellite product (DWD WMS)
-      document.getElementById('ov-satproduct').addEventListener('change', () => {
-        if (satLayer) { map.removeLayer(satLayer); satLayer = null; }
+      document.getElementById('ov-satproduct').addEventListener('change', async () => {
         if (satOn) {
-          updateDWDSat();
+          const targetSec = Math.round((Date.now() + timeOffset * 3600000) / 1000);
+          const imgTime = await updateDWDSat();
           const prod = document.getElementById('ov-satproduct');
-          document.getElementById('ov-time-info').textContent =
-            `◎ Satellit · ${prod.options[prod.selectedIndex].text} · DWD/EUMETSAT`;
+          document.getElementById('ov-time-info').innerHTML = satTimeInfoHtml(prod, imgTime, targetSec);
         }
       });
     }
