@@ -8,15 +8,13 @@ import sys
 import json
 import datetime
 import pathlib
-import tempfile
 import re
 import urllib.parse
 
 import requests
-import eccodes
 
 from obs_store import open_store
-from bufr_decode import decode_msg
+from bufr_decode import decode_all_from_bytes
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -62,45 +60,7 @@ def list_dwd_files() -> list[tuple]:
 def decode_bufr_url(url: str) -> list[dict]:
     r = SESSION.get(url, timeout=30)
     r.raise_for_status()
-    obs_list = []
-    with tempfile.NamedTemporaryFile(suffix='.bufr', delete=False) as tmp:
-        tmp.write(r.content)
-        tmp_path = pathlib.Path(tmp.name)
-    try:
-        with open(tmp_path, 'rb') as f:
-            while True:
-                try:
-                    handle = eccodes.codes_bufr_new_from_file(f)
-                    if handle is None:
-                        break
-                    try:
-                        n_sub = int(eccodes.codes_get(handle, 'numberOfSubsets') or 1)
-                    except Exception:
-                        n_sub = 1
-                    for si in range(1, n_sub + 1):
-                        try:
-                            if n_sub > 1:
-                                sub = eccodes.codes_clone(handle)
-                                eccodes.codes_set(sub, 'unpack', 1)
-                                eccodes.codes_set(sub, 'extractSubset', si)
-                                eccodes.codes_set(sub, 'doExtractSubsets', 1)
-                            else:
-                                sub = handle
-                            try:
-                                obs = decode_msg(sub)
-                                if obs and obs.get('wmoId'):
-                                    obs_list.append(obs)
-                            finally:
-                                if n_sub > 1:
-                                    eccodes.codes_release(sub)
-                        except Exception:
-                            pass
-                    eccodes.codes_release(handle)
-                except Exception:
-                    break
-    finally:
-        tmp_path.unlink(missing_ok=True)
-    return obs_list
+    return [obs for obs in decode_all_from_bytes(r.content) if obs.get('wmoId')]
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 

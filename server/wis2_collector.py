@@ -13,11 +13,10 @@ import re
 import time
 
 import requests
-import eccodes
 import paho.mqtt.client as mqtt
 
 from obs_store import open_store
-from bufr_decode import decode_msg
+from bufr_decode import decode_all_from_bytes
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -66,49 +65,54 @@ def fetch_bufr_bytes(wnm: dict) -> bytes | None:
     return None
 
 
-def decode_wnm(wnm: dict) -> dict | None:
-    """Decode the BUFR message referenced by one WIS2 Notification Message."""
+def decode_wnm(wnm: dict) -> list[dict]:
+    """Decode every observation referenced by one WIS2 Notification Message.
+
+    Most national nodes (France, Poland, Rwanda, ...) publish one message per
+    station, with a `wigos_station_identifier` on the notification itself.
+    DWD instead bundles its whole national network into a single multi-subset
+    BUFR file per message, with no per-station WIGOS id on the notification —
+    each subset carries its own classic blockNumber/stationNumber instead.
+    Both shapes are handled here, since bailing out early on a missing
+    wigos_station_identifier (as an earlier version did) silently dropped
+    every bundled national feed, DWD included."""
     props = wnm.get('properties', {})
-    wigos = props.get('wigos_station_identifier', '')
-    m = WIGOS_CLASSIC_RE.match(wigos)
-    if not m:
-        return None  # no classic WMO ID -> not yet mappable to wmo_stations.json
-
-    fallback_wmo_id = int(m.group(1))
-
     data = fetch_bufr_bytes(wnm)
     if not data:
-        return None
+        return []
 
-    try:
-        handle = eccodes.codes_new_from_message(data)
-    except Exception:
-        return None
-    if handle is None:
-        return None
+    decoded = decode_all_from_bytes(data, metar_type='SYNOP-WIS2', raw_prefix='WIS2 SYNOP')
+    if not decoded:
+        return []
 
-    try:
-        obs = decode_msg(handle, metar_type='SYNOP-WIS2', raw_prefix='WIS2 SYNOP')
-    finally:
-        eccodes.codes_release(handle)
+    wigos = props.get('wigos_station_identifier', '')
+    m = WIGOS_CLASSIC_RE.match(wigos)
+    fallback_wmo_id = int(m.group(1)) if m else None
 
-    if obs is None:
-        return None
-    if obs.get('wmoId') is None:
-        # BUFR content used WIGOS-only station identification (no classic
-        # blockNumber/stationNumber) — fall back to the WIGOS ID from the
-        # notification message itself, which we already confirmed is classic.
-        obs['wmoId'] = fallback_wmo_id
-        obs['icaoId'] = f'WMO{fallback_wmo_id:05d}'
+    geom = wnm.get('geometry', {})
+    results = []
+    for obs in decoded:
+        if obs.get('wmoId') is None:
+            # BUFR content used WIGOS-only station identification (no classic
+            # blockNumber/stationNumber). Only a single-station notification
+            # carries a WIGOS id we can fall back to; a bundle with no
+            # blockNumber for a given subset can't be identified at all.
+            if fallback_wmo_id is None:
+                continue
+            obs['wmoId'] = fallback_wmo_id
+            obs['icaoId'] = f'WMO{fallback_wmo_id:05d}'
 
-    # Prefer the notification's own geometry if the BUFR gave no coordinates
-    # (shouldn't normally happen, kept for robustness).
-    if obs.get('lat') is None or obs.get('lon') is None:
-        geom = wnm.get('geometry', {})
-        if geom.get('type') == 'Point':
-            obs['lon'], obs['lat'] = geom['coordinates'][:2]
+        # Prefer the notification's own geometry if the BUFR gave no
+        # coordinates (shouldn't normally happen, kept for robustness).
+        if obs.get('lat') is None or obs.get('lon') is None:
+            if geom.get('type') == 'Point':
+                obs['lon'], obs['lat'] = geom['coordinates'][:2]
+            else:
+                continue
 
-    return obs
+        results.append(obs)
+
+    return results
 
 
 # ── MQTT callbacks ───────────────────────────────────────────────────────────
@@ -162,41 +166,45 @@ def on_message(client, userdata, msg):
         return
 
     try:
-        obs = decode_wnm(wnm)
+        obs_list = decode_wnm(wnm)
     except Exception as exc:
         _stats['errors'] += 1
         print(f'  WARN: Dekodierung fehlgeschlagen: {exc}', file=sys.stderr)
-        obs = None
+        obs_list = []
 
-    if obs is None or obs.get('obsTime') is None:
+    if not obs_list:
         _stats['skipped'] += 1
-        _log_stats_if_due()
-        return
-
-    # Sanity check: some national WIS2 nodes have been observed to publish
-    # clock-skewed or stale test data. A "future" observation is never valid;
-    # reject it rather than let it outrank a correct BUFR/OGIMET row later.
-    if obs['obsTime'] > time.time() + 300:
-        _stats['skipped'] += 1
-        print(f'  WARN: verworfen (Termin in der Zukunft) {obs.get("wmoId")} '
-              f'obsTime={obs["obsTime"]}', file=sys.stderr)
         _log_stats_if_due()
         return
 
     db = userdata['db']
-    skey = f'WMO{obs["wmoId"]:05d}'
-    try:
-        db.upsert('synop-wis2', skey, obs['obsTime'], obs['lat'], obs['lon'], obs)
-        db.commit()
-        _stats['stored'] += 1
-        latency = time.time() - obs['obsTime']
-        if 0 <= latency < 6 * 3600:
-            _stats['latency_sum'] += latency
-            _stats['latency_n']   += 1
-    except Exception as exc:
-        _stats['errors'] += 1
-        print(f'  WARN: SQLite upsert fehlgeschlagen ({skey}): {exc}', file=sys.stderr)
+    for obs in obs_list:
+        if obs.get('obsTime') is None:
+            _stats['skipped'] += 1
+            continue
 
+        # Sanity check: some national WIS2 nodes have been observed to publish
+        # clock-skewed or stale test data. A "future" observation is never
+        # valid; reject it rather than let it outrank a correct BUFR/OGIMET row.
+        if obs['obsTime'] > time.time() + 300:
+            _stats['skipped'] += 1
+            print(f'  WARN: verworfen (Termin in der Zukunft) {obs.get("wmoId")} '
+                  f'obsTime={obs["obsTime"]}', file=sys.stderr)
+            continue
+
+        skey = f'WMO{obs["wmoId"]:05d}'
+        try:
+            db.upsert('synop-wis2', skey, obs['obsTime'], obs['lat'], obs['lon'], obs)
+            _stats['stored'] += 1
+            latency = time.time() - obs['obsTime']
+            if 0 <= latency < 6 * 3600:
+                _stats['latency_sum'] += latency
+                _stats['latency_n']   += 1
+        except Exception as exc:
+            _stats['errors'] += 1
+            print(f'  WARN: SQLite upsert fehlgeschlagen ({skey}): {exc}', file=sys.stderr)
+
+    db.commit()  # once per message, not per station — bundles can hold hundreds
     _cleanup_if_due(db)
     _log_stats_if_due()
 

@@ -5,6 +5,8 @@ and wis2_collector.py.
 """
 import math
 import datetime
+import pathlib
+import tempfile
 
 import eccodes
 
@@ -159,3 +161,50 @@ def decode_msg(handle, metar_type: str = 'SYNOP-BUFR', raw_prefix: str = 'BUFR S
         'wxString': wx_str, 'skyCondition': sky,
         'rawOb': f'{raw_prefix} WMO{wmo_id} {yr}-{mo:02d}-{dy:02d} {hr:02d}:{mi:02d}Z',
     }
+
+
+def decode_all_from_bytes(data: bytes, metar_type: str = 'SYNOP-BUFR',
+                           raw_prefix: str = 'BUFR SYNOP') -> list[dict]:
+    """Decode every BUFR message and subset in a byte buffer that may hold
+    one (single-station) or many (bundled, e.g. DWD's national bulletins)
+    messages. Unlike decode_msg(), does not drop obs with no wmoId — callers
+    that need a classic 5-digit WMO ID decide themselves what to do with those."""
+    obs_list: list[dict] = []
+    with tempfile.NamedTemporaryFile(suffix='.bufr', delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = pathlib.Path(tmp.name)
+    try:
+        with open(tmp_path, 'rb') as f:
+            while True:
+                try:
+                    handle = eccodes.codes_bufr_new_from_file(f)
+                    if handle is None:
+                        break
+                    try:
+                        n_sub = int(eccodes.codes_get(handle, 'numberOfSubsets') or 1)
+                    except Exception:
+                        n_sub = 1
+                    for si in range(1, n_sub + 1):
+                        try:
+                            if n_sub > 1:
+                                sub = eccodes.codes_clone(handle)
+                                eccodes.codes_set(sub, 'unpack', 1)
+                                eccodes.codes_set(sub, 'extractSubset', si)
+                                eccodes.codes_set(sub, 'doExtractSubsets', 1)
+                            else:
+                                sub = handle
+                            try:
+                                obs = decode_msg(sub, metar_type=metar_type, raw_prefix=raw_prefix)
+                                if obs:
+                                    obs_list.append(obs)
+                            finally:
+                                if n_sub > 1:
+                                    eccodes.codes_release(sub)
+                        except Exception:
+                            pass
+                    eccodes.codes_release(handle)
+                except Exception:
+                    break
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    return obs_list
