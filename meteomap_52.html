@@ -1139,9 +1139,9 @@
       </div>
 
       <div id="tile-row">
-        <button class="tile-btn active" data-tile="dark">Dunkel</button>
+        <button class="tile-btn" data-tile="dark">Dunkel</button>
         <button class="tile-btn" data-tile="light">Hell</button>
-        <button class="tile-btn" data-tile="topo">Topo</button>
+        <button class="tile-btn active" data-tile="topo">Topo</button>
         <button class="tile-btn" data-tile="sat">SAT</button>
       </div>
 
@@ -2709,13 +2709,13 @@
       sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         { attribution: '© Esri', maxZoom: 19 })
     };
-    let activeTile = 'dark';
+    let activeTile = 'topo';
 
     function barbColor() {
       // Dark tiles → white barbs; light/topo/sat tiles → dark barbs with outline
       return ['light', 'topo'].includes(activeTile) ? '#1a1a2e' : '#ffffff';
     }
-    tiles.dark.addTo(map);
+    tiles.topo.addTo(map);
 
     function switchTile(name) {
       if (name === activeTile) return;
