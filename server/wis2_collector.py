@@ -158,6 +158,7 @@ def on_message(client, userdata, msg):
         wnm = json.loads(msg.payload)
     except Exception:
         _stats['errors'] += 1
+        _log_stats_if_due()
         return
 
     try:

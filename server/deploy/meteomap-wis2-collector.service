@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=heidi
 WorkingDirectory=/apps/MeteoMap/repo/server
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/apps/MeteoMap/venv/bin/python /apps/MeteoMap/repo/server/wis2_collector.py
 Restart=always
 RestartSec=10
