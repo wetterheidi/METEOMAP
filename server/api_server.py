@@ -193,9 +193,9 @@ def get_obs(
     t:    int = Query(None, description='Target Unix timestamp (seconds UTC); omit for now'),
 ):
     """
-    Return merged SYNOP observations (OGIMET + BUFR + DMI) closest to timestamp t
-    within ±30 min, filtered by bbox.
-    Source priority for duplicate stations: DMI > BUFR > OGIMET.
+    Return merged SYNOP observations (OGIMET + BUFR + WIS2 + DMI) closest to
+    timestamp t within ±30 min, filtered by bbox.
+    Source priority for duplicate stations: DMI > WIS2 > BUFR > OGIMET.
     """
     try:
         s, w, n, e = [float(x) for x in bbox.split(',')]
@@ -207,9 +207,9 @@ def get_obs(
     with open_store() as db:
         raw = db.query(target_t, s, w, n, e)
 
-    # Source priority merge: DMI > BUFR > OGIMET
-    # metarType values: 'SYNOP' (OGIMET), 'SYNOP-BUFR', 'SYNOP-DMI'
-    SOURCE_PRIO = {'SYNOP': 0, 'SYNOP-BUFR': 1, 'SYNOP-DMI': 2}
+    # Source priority merge: DMI > WIS2 > BUFR > OGIMET
+    # metarType values: 'SYNOP' (OGIMET), 'SYNOP-BUFR', 'SYNOP-WIS2', 'SYNOP-DMI'
+    SOURCE_PRIO = {'SYNOP': 0, 'SYNOP-BUFR': 1, 'SYNOP-WIS2': 2, 'SYNOP-DMI': 3}
     merged: dict[str, dict] = {}
     for obs in raw:
         key = str(obs.get('wmoId') or obs.get('icaoId') or '')

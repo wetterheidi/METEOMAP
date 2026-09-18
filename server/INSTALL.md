@@ -46,6 +46,7 @@ cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.service        /etc/syst
 cp /apps/MeteoMap/repo/server/deploy/meteomap-collector.timer          /etc/systemd/system/
 cp /apps/MeteoMap/repo/server/deploy/meteomap-bufr-collector.service   /etc/systemd/system/
 cp /apps/MeteoMap/repo/server/deploy/meteomap-bufr-collector.timer     /etc/systemd/system/
+cp /apps/MeteoMap/repo/server/deploy/meteomap-wis2-collector.service   /etc/systemd/system/
 
 systemctl daemon-reload
 
@@ -55,6 +56,9 @@ systemctl enable --now meteomap-api.service
 # Collector-Timer starten (laufen alle 30 min)
 systemctl enable --now meteomap-collector.timer
 systemctl enable --now meteomap-bufr-collector.timer
+
+# WIS2-Collector läuft dauerhaft (kein Timer, hält eine MQTT-Verbindung offen)
+systemctl enable --now meteomap-wis2-collector.service
 ```
 
 Prüfen ob alles läuft:

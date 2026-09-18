@@ -1,0 +1,16 @@
+[Unit]
+Description=MeteoMap WIS2 Collector (persistent MQTT subscriber)
+After=network.target
+
+[Service]
+Type=simple
+User=heidi
+WorkingDirectory=/apps/MeteoMap/repo/server
+ExecStart=/apps/MeteoMap/venv/bin/python /apps/MeteoMap/repo/server/wis2_collector.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

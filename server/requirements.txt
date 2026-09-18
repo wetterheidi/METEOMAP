@@ -2,3 +2,4 @@ fastapi==0.115.12
 uvicorn==0.34.0
 requests==2.32.3
 eccodes>=2.35.0
+paho-mqtt>=2.1.0

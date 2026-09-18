@@ -1114,7 +1114,7 @@
   <div id="sidebar">
     <div id="sb-head">
       <h1>▶ METEOMAP</h1>
-      <div class="sub">METAR · SPECI · SYNOP-BUFR &nbsp;|&nbsp; AWC · DWD OpenData</div>
+      <div class="sub">METAR · SPECI · SYNOP-BUFR · WIS2 &nbsp;|&nbsp; AWC · DWD OpenData</div>
     </div>
 
     <div id="tab-nav">
@@ -2550,6 +2550,7 @@
     function tooltipHTML(obs) {
       const elev = obs.elev != null ? `${Math.round(obs.elev)} m ü.NN` : '';
       const srcClr = obs.metarType === 'SYNOP-DMI'  ? '#e040fb'
+        : obs.metarType === 'SYNOP-WIS2' ? '#7c4dff'
         : obs.metarType === 'SYNOP-BUFR' ? '#00e090'
         : obs.metarType === 'SYNOP'      ? '#ffb000'
         : '#00d4ff';
@@ -3655,36 +3656,20 @@
       }
 
       async function fetchSynopStation(wmoId) {
-        const stations = await loadWmoStations();
-        const block = Math.floor(wmoId / 1000);
-        const now = new Date();
-        const from = new Date(now - 3 * 3600000);
-        const fmt = d => d.toISOString().replace(/[-T:]/g, '').slice(0, 12);
-
-        // 1) Try Ogimet FM-12
-        try {
-          const url = `https://www.ogimet.com/cgi-bin/getsynop?block=${String(block).padStart(2,'0')}&begin=${fmt(from)}&end=${fmt(now)}`;
-          const r = await corsGet(url);
-          const text = await r.text();
-          let obs = null;
-          for (const line of text.split('\n')) {
-            const l = line.trim().replace(/=+$/, '');
-            if (!l || l.startsWith('#')) continue;
-            if (parseInt(l.split(',')[0]) !== wmoId) continue;
-            try { const o = parseSynopLine(l, stations); if (o) obs = o; } catch {}
-          }
-          if (obs) return obs;
-        } catch {}
-
-        // 2) Fallback: DWD BUFR (stations that don't report via FM-12)
+        await loadWmoStations();
         const st = stationById(wmoId);
         if (!st) return null;
+
+        // Same merged source (OGIMET + BUFR + WIS2 + DMI, DMI > WIS2 > BUFR > OGIMET
+        // priority) and the same fetch/cache path as the map, so a station card
+        // shows exactly what the map would show for that station.
         const pad = 0.5;
-        const bbox = `${(st.lat - pad).toFixed(2)},${(st.lon - pad).toFixed(2)},${(st.lat + pad).toFixed(2)},${(st.lon + pad).toFixed(2)}`;
-        const bufrObs = await fetch(`${SYNOP_API}/meteomap/bufr?bbox=${bbox}`)
-          .then(r => r.ok ? r.json() : [])
-          .catch(() => []);
-        return bufrObs.find(o => o.wmoId === wmoId) || null;
+        const bounds = L.latLngBounds(
+          [st.lat - pad, st.lon - pad],
+          [st.lat + pad, st.lon + pad]
+        );
+        const obs = await fetchSynopObs(bounds, Date.now());
+        return obs.find(o => o.wmoId === wmoId) || null;
       }
 
       async function renderWx(id, idx) {

@@ -59,6 +59,12 @@ class ObsStore:
             (source, skey, obs_time, lat, lon, json.dumps(data, ensure_ascii=False)),
         )
 
+    def commit(self) -> None:
+        """Flush pending writes. Needed by long-running collectors (e.g. an
+        MQTT subscriber) that write incrementally instead of once at exit —
+        the context manager's own commit only fires when the `with` block ends."""
+        self._conn.commit()
+
     def cleanup(self) -> int:
         cutoff = int(time.time()) - RETAIN_HOURS * 3600
         cur = self._conn.execute(
