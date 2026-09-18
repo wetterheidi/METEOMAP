@@ -11,6 +11,7 @@ import json
 import base64
 import re
 import time
+import uuid
 
 import requests
 import paho.mqtt.client as mqtt
@@ -24,6 +25,13 @@ BROKER_HOST = 'globalbroker.meteo.fr'
 BROKER_PORT = 8883
 BROKER_USER = 'everyone'
 BROKER_PASS = 'everyone'
+
+# Without an explicit client_id, paho sends an empty one and asks the broker
+# to assign one — globalbroker.meteo.fr rejects that ("Client identifier not
+# valid"), which sends the collector into a tight reconnect loop with no data
+# flowing. A fixed prefix + random suffix keeps it unique across restarts and
+# any concurrent test connections from other hosts.
+CLIENT_ID = f'meteomap-wis2-{uuid.uuid4().hex[:12]}'
 
 TOPIC = 'origin/a/wis2/+/data/core/weather/surface-based-observations/#'
 
@@ -151,7 +159,11 @@ def _cleanup_if_due(db):
 
 
 def on_connect(client, userdata, flags, rc, properties=None):
-    print(f'WIS2: verbunden mit {BROKER_HOST}:{BROKER_PORT} (rc={rc})')
+    if rc != 0:
+        print(f'WIS2: Verbindung abgelehnt (rc={rc}) – kein Subscribe, warte auf Reconnect',
+              file=sys.stderr)
+        return
+    print(f'WIS2: verbunden mit {BROKER_HOST}:{BROKER_PORT} als {CLIENT_ID}')
     client.subscribe(TOPIC, qos=0)
     print(f'WIS2: abonniert auf {TOPIC}')
 
@@ -218,7 +230,8 @@ def on_disconnect(client, userdata, *args):
 
 def main():
     with open_store() as db:
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5)
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CLIENT_ID,
+                              protocol=mqtt.MQTTv5)
         client.username_pw_set(BROKER_USER, BROKER_PASS)
         client.tls_set()
         client.user_data_set({'db': db})
