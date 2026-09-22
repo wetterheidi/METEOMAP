@@ -11,6 +11,11 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;500&display=swap"
     rel="stylesheet">
+  <script>
+    // Theme sofort setzen, bevor CSS greift → kein Aufflackern
+    const _t = localStorage.getItem('meteomap-theme');
+    if (_t) document.documentElement.dataset.theme = _t;
+  </script>
   <style>
     :root {
       --bg: #080c14;
@@ -26,6 +31,7 @@
       --amber: #ffb000;
       --green: #00e090;
       --red: #ff4444;
+      --bg-rgb: 8, 12, 20;
       --mono: 'JetBrains Mono', monospace;
       --head: 'Chakra Petch', sans-serif;
       --body: 'Inter', sans-serif;
@@ -36,6 +42,24 @@
       --cs-yellow: #FDD835;
       --cs-amber: #FB8C00;
       --cs-red: #E53935;
+    }
+
+    /* ── TAGMODUS ── */
+    [data-theme="light"] {
+      --bg: #d8dfe8;
+      --panel: #eef1f6;
+      --panel2: #f4f6fa;
+      --panel3: #ffffff;
+      --border: #c3ccd9;
+      --border2: #aab8c8;
+      --text: #16212e;
+      --text-dim: #647688;
+      --text-mid: #4a5c70;
+      --cyan: #0077a8;
+      --amber: #a15c00;
+      --green: #0f8a52;
+      --red: #cc2222;
+      --bg-rgb: 216, 223, 232;
     }
 
     *,
@@ -82,10 +106,35 @@
 
     /* Header */
     #sb-head {
+      position: relative;
       padding: 14px 16px 12px;
       background: var(--bg);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
+    }
+
+    #theme-toggle {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      color: var(--text-mid);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all .15s;
+    }
+
+    #theme-toggle:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
     }
 
     /* ── SOURCE TOGGLE ── */
@@ -650,7 +699,7 @@
     }
 
     .leaflet-control-attribution {
-      background: rgba(8, 12, 20, .75) !important;
+      background: rgba(var(--bg-rgb), .75) !important;
       color: var(--text-dim) !important;
       font-size: 9px !important;
     }
@@ -680,7 +729,7 @@
     }
 
     #loading-box {
-      background: rgba(8, 12, 20, .88);
+      background: rgba(var(--bg-rgb), .88);
       border: 1px solid var(--border2);
       border-radius: 10px;
       padding: 18px 28px;
@@ -1113,6 +1162,7 @@
   <!-- SIDEBAR -->
   <div id="sidebar">
     <div id="sb-head">
+      <button id="theme-toggle" title="Tag-/Nachtmodus wechseln">🌙</button>
       <h1>▶ METEOMAP</h1>
       <div class="sub">METAR · SPECI · SYNOP-BUFR · WIS2 &nbsp;|&nbsp; AWC · DWD OpenData</div>
     </div>
@@ -3811,6 +3861,22 @@
     })();
 
     Mon.init();
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAGMODUS (Theme-Toggle)
+    // ═══════════════════════════════════════════════════════════════
+    (function initTheme() {
+      const btn = document.getElementById('theme-toggle');
+      const isLight = () => document.documentElement.dataset.theme === 'light';
+      const syncBtn = () => { btn.textContent = isLight() ? '☀' : '🌙'; };
+      syncBtn();
+      btn.addEventListener('click', () => {
+        const next = isLight() ? '' : 'light';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('meteomap-theme', next);
+        syncBtn();
+      });
+    })();
   </script>
 </body>
 
