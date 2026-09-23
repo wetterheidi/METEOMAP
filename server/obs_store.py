@@ -59,6 +59,13 @@ class ObsStore:
             (source, skey, obs_time, lat, lon, json.dumps(data, ensure_ascii=False)),
         )
 
+    def get(self, source: str, skey: str, obs_time: int) -> dict | None:
+        row = self._conn.execute(
+            'SELECT data FROM observations WHERE source = ? AND skey = ? AND obs_time = ?',
+            (source, skey, obs_time),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
     def commit(self) -> None:
         """Flush pending writes. Needed by long-running collectors (e.g. an
         MQTT subscriber) that write incrementally instead of once at exit —

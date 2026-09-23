@@ -33,11 +33,17 @@ TAB4678 = {100: None, 101: None, 102: 'BR', 103: 'FG', 104: 'FG',
 # ── eccodes helpers ───────────────────────────────────────────────────────────
 
 def _safe(h, k):
-    try:
-        v = eccodes.codes_get(h, k)
-        return None if v in (MISS, MISSL, 2147483647, -1e+100) else v
-    except Exception:
-        return None
+    # Prefer the first occurrence: for a key that appears more than once
+    # (e.g. airTemperature/windSpeed in template 307096, which most WIS2
+    # nodes use), an unqualified codes_get returns the *last* one — usually
+    # an empty supplementary-sensor slot — so temp/dewp/wind came out missing.
+    for key in (f'#1#{k}', k):
+        try:
+            v = eccodes.codes_get(h, key)
+            return None if v in (MISS, MISSL, 2147483647, -1e+100) else v
+        except Exception:
+            continue
+    return None
 
 def _safe_arr(h, k):
     try:
@@ -85,7 +91,8 @@ def decode_msg(handle, metar_type: str = 'SYNOP-BUFR', raw_prefix: str = 'BUFR S
     wgst = round(wg * 1.94384, 1) if wg is not None else None
     wdir = int(wd) if wd is not None else None
 
-    qfe  = _safe(handle, 'stationPressure')
+    # 307096 carries station pressure as nonCoordinatePressure
+    qfe  = _safe(handle, 'stationPressure') or _safe(handle, 'nonCoordinatePressure')
     slp  = _safe(handle, 'pressureReducedToMeanSeaLevel')
     qnh  = None
     if qfe and elev is not None and tk:

@@ -123,6 +123,19 @@ def decode_wnm(wnm: dict) -> list[dict]:
     return results
 
 
+_RICHNESS_FIELDS = ('temp', 'dewp', 'wdir', 'wspd', 'altim', 'visib', 'wxString')
+
+def _richness(obs: dict) -> int:
+    """How many of the displayed fields an observation actually fills.
+
+    DWD's bundle carries several products per station and termin — the full
+    SYNOP, 10-minute values and 5 cm ground-temperature messages that have no
+    2 m temperature or wind at all. They share (station, obsTime), so without
+    this the store kept whichever was decoded last, often an empty one."""
+    return (sum(obs.get(k) is not None for k in _RICHNESS_FIELDS)
+            + bool(obs.get('skyCondition')))
+
+
 # ── MQTT callbacks ───────────────────────────────────────────────────────────
 
 _stats = {'received': 0, 'stored': 0, 'skipped': 0, 'errors': 0, 'latency_sum': 0.0, 'latency_n': 0}
@@ -206,6 +219,10 @@ def on_message(client, userdata, msg):
 
         skey = f'WMO{obs["wmoId"]:05d}'
         try:
+            existing = db.get('synop-wis2', skey, obs['obsTime'])
+            if existing is not None and _richness(existing) > _richness(obs):
+                _stats['skipped'] += 1
+                continue
             db.upsert('synop-wis2', skey, obs['obsTime'], obs['lat'], obs['lon'], obs)
             _stats['stored'] += 1
             latency = time.time() - obs['obsTime']
